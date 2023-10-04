@@ -90,68 +90,78 @@ configure_lan865x_1(){
 while [ 1 ];
 do
 printf "\033c"
-echo "1st LAN865x PLCA Settings:"
+echo "1st LAN865x Settings:"
 echo "--------------------------"
 
-v1="$(awk '{if(NR==49) print $5}' lan865x-overlay-tmp.dts)"
+v1="$(awk '{if(NR==51) print $5}' lan865x-overlay-tmp.dts)"
 v2=$(echo $v1 | awk -F[='<''>'] '{print $2}')
 plca_mode_1=$v2
 echo "	1. PLCA mode		: $v2"
 
-v1="$(awk '{if(NR==50) print $5}' lan865x-overlay-tmp.dts)"
+v1="$(awk '{if(NR==52) print $5}' lan865x-overlay-tmp.dts)"
 v2=$(echo $v1 | awk -F[='<''>'] '{print $2}')
 plca_node_id_1=$v2
 echo "	2. PLCA node id		: $v2"
 
-v1="$(awk '{if(NR==51) print $5}' lan865x-overlay-tmp.dts)"
+v1="$(awk '{if(NR==53) print $5}' lan865x-overlay-tmp.dts)"
 v2=$(echo $v1 | awk -F[='<''>'] '{print $2}')
 plca_node_count_1=$v2
 echo "	3. PLCA node count	: $v2"
 
-v1="$(awk '{if(NR==52) print $5}' lan865x-overlay-tmp.dts)"
+v1="$(awk '{if(NR==54) print $5}' lan865x-overlay-tmp.dts)"
 v2=$(echo $v1 | awk -F[='<''>'] '{print $2}')
 plca_burst_count_1=$v2
 echo "	4. PLCA burst count	: $v2"
 
-v1="$(awk '{if(NR==53) print $5}' lan865x-overlay-tmp.dts)"
+v1="$(awk '{if(NR==55) print $5}' lan865x-overlay-tmp.dts)"
 v2=$(echo $v1 | awk -F[='<''>'] '{print $2}')
 plca_burst_timer_1=$v2
 echo "	5. PLCA burst timer	: $v2"
 
-v1="$(awk '{if(NR==54) print $5}' lan865x-overlay-tmp.dts)"
+v1="$(awk '{if(NR==56) print $5}' lan865x-overlay-tmp.dts)"
 v2=$(echo $v1 | awk -F[='<''>'] '{print $2}')
 plca_to_timer_1=$v2
 echo "	6. PLCA TO timer	: $v2"
 
-v1="$(awk '{if(NR==55) print $5}' lan865x-overlay-tmp.dts)"
+v1="$(awk '{if(NR==57) print $5}' lan865x-overlay-tmp.dts)"
 v2=$(echo $v1 | awk -F[='<''>'] '{print $2}')
 tx_cut_through_1=$v2
 echo "	7. Tx cut through	: $v2"
 
-v1="$(awk '{if(NR==56) print $5}' lan865x-overlay-tmp.dts)"
+v1="$(awk '{if(NR==58) print $5}' lan865x-overlay-tmp.dts)"
 v2=$(echo $v1 | awk -F[='<''>'] '{print $2}')
 rx_cut_through_1=$v2
 echo "	8. Rx cut through	: $v2"
 
-v1="$(awk '{if(NR==46) print $0}' lan865x-overlay-tmp.dts)"
+v1="$(awk '{if(NR==59) print $5}' lan865x-overlay-tmp.dts)"
+v2=$(echo $v1 | awk -F[='<''>'] '{print $2}')
+oa_chunk_size_1=$v2
+echo "	9. OA chunk size	: $v2"
+
+v1="$(awk '{if(NR==60) print $5}' lan865x-overlay-tmp.dts)"
+v2=$(echo $v1 | awk -F[='<''>'] '{print $2}')
+oa_protected_1=$v2
+echo "	10. OA protected	: $v2"
+
+v1="$(awk '{if(NR==48) print $0}' lan865x-overlay-tmp.dts)"
 v2=$(grep -oP '= \K.*?(?=;)' <<< "$v1")
 v2=$(echo "$v2" | sed -r 's/[ ]+/:/g')
 v2=${v2:1}
 v2=${v2:0:17}
 mac_addr_1=$v2
-echo "	9. MAC address 		: $v2"
-
-v1="$(awk '{if(NR==8) print $0}' load-tmp.sh)"
-v2=$(cut -d "=" -f2- <<< $v1)
-ip_addr_1=$v2
-echo "	10. IP address		: $ip_addr_1"
+echo "	11. MAC address 	: $v2"
 
 v1="$(awk '{if(NR==9) print $0}' load-tmp.sh)"
+v2=$(cut -d "=" -f2- <<< $v1)
+ip_addr_1=$v2
+echo "	12. IP address		: $ip_addr_1"
+
+v1="$(awk '{if(NR==10) print $0}' load-tmp.sh)"
 v2=$(cut -d "=" -f2 <<< "$v1")
 subnet_mask_1=$v2
-echo "	11. Subnet mask		: $subnet_mask_1"
+echo "	13. Subnet mask		: $subnet_mask_1"
 
-echo "	12. Save & Configure"
+echo "	14. Save & Configure"
 
 echo "	99. Back
 	0. Exit"
@@ -164,7 +174,7 @@ read plca_mode_1
 if [[ $plca_mode_1 == 0 ]] || [[ $plca_mode_1 == 1 ]]
 then
 data="                                plca-enable = /bits/ 8 <$plca_mode_1>; /* 1 - PLCA enable, 0 - CSMA/CD enable */"
-awk -F"=" -v newval="$data" '{ if (NR == 49) print newval ; else print $0}' lan865x-overlay-tmp.dts > lan865x-overlay-tmp-tmp.dts
+awk -F"=" -v newval="$data" '{ if (NR == 51) print newval ; else print $0}' lan865x-overlay-tmp.dts > lan865x-overlay-tmp-tmp.dts
 mv lan865x-overlay-tmp-tmp.dts lan865x-overlay-tmp.dts
 else
 echo "Invalid input...!"
@@ -190,7 +200,7 @@ echo "Invalid input...!"
 read -p "Press Enter key to continue...!"
 else
 data="                                plca-node-id = /bits/ 8 <$plca_node_id_1>; /* PLCA node id range: 0 to 254 */"
-awk -F"=" -v newval="$data" '{ if (NR == 50) print newval ; else print $0}' lan865x-overlay-tmp.dts > lan865x-overlay-tmp-tmp.dts
+awk -F"=" -v newval="$data" '{ if (NR == 52) print newval ; else print $0}' lan865x-overlay-tmp.dts > lan865x-overlay-tmp-tmp.dts
 mv lan865x-overlay-tmp-tmp.dts lan865x-overlay-tmp.dts
 fi
 fi
@@ -214,7 +224,7 @@ echo "Invalid input...!"
 read -p "Press Enter key to continue...!"
 else
 data="                                plca-node-count = /bits/ 8 <$plca_node_count_1>; /* PLCA node count range: 1 to 255 */"
-awk -F"=" -v newval="$data" '{ if (NR == 51) print newval ; else print $0}' lan865x-overlay-tmp.dts > lan865x-overlay-tmp-tmp.dts
+awk -F"=" -v newval="$data" '{ if (NR == 53) print newval ; else print $0}' lan865x-overlay-tmp.dts > lan865x-overlay-tmp-tmp.dts
 mv lan865x-overlay-tmp-tmp.dts lan865x-overlay-tmp.dts
 fi
 fi
@@ -239,7 +249,7 @@ echo "Invalid input...!"
 read -p "Press Enter key to continue...!"
 else
 data="                                plca-burst-count = /bits/ 8 <0x$plca_burst_count_1>; /* PLCA burst count range: 0x0 to 0xFF */"
-awk -F"=" -v newval="$data" '{ if (NR == 52) print newval ; else print $0}' lan865x-overlay-tmp.dts > lan865x-overlay-tmp-tmp.dts
+awk -F"=" -v newval="$data" '{ if (NR == 54) print newval ; else print $0}' lan865x-overlay-tmp.dts > lan865x-overlay-tmp-tmp.dts
 mv lan865x-overlay-tmp-tmp.dts lan865x-overlay-tmp.dts
 fi
 fi
@@ -263,7 +273,7 @@ echo "Invalid input...!"
 read -p "Press Enter key to continue...!"
 else
 data="                                plca-burst-timer = /bits/ 8 <0x$plca_burst_timer_1>; /* PLCA burst timer */"
-awk -F"=" -v newval="$data" '{ if (NR == 53) print newval ; else print $0}' lan865x-overlay-tmp.dts > lan865x-overlay-tmp-tmp.dts
+awk -F"=" -v newval="$data" '{ if (NR == 55) print newval ; else print $0}' lan865x-overlay-tmp.dts > lan865x-overlay-tmp-tmp.dts
 mv lan865x-overlay-tmp-tmp.dts lan865x-overlay-tmp.dts
 fi
 fi
@@ -287,7 +297,7 @@ echo "Invalid input...!"
 read -p "Press Enter key to continue...!"
 else
 data="                                plca-to-timer = /bits/ 8 <0x$plca_to_timer_1>; /* PLCA TO timer */"
-awk -F"=" -v newval="$data" '{ if (NR == 54) print newval ; else print $0}' lan865x-overlay-tmp.dts > lan865x-overlay-tmp-tmp.dts
+awk -F"=" -v newval="$data" '{ if (NR == 56) print newval ; else print $0}' lan865x-overlay-tmp.dts > lan865x-overlay-tmp-tmp.dts
 mv lan865x-overlay-tmp-tmp.dts lan865x-overlay-tmp.dts
 fi
 fi
@@ -298,7 +308,7 @@ read tx_cut_through_1
 if [[ $tx_cut_through_1 == 0 ]] || [[ $tx_cut_through_1 == 1 ]]
 then
 data="                                tx-cut-through-mode = /bits/ 8 <$tx_cut_through_1>; /* 1 - Tx cut through mode enable, 0 - Store and forward mode enable */"
-awk -F"=" -v newval="$data" '{ if (NR == 55) print newval ; else print $0}' lan865x-overlay-tmp.dts > lan865x-overlay-tmp-tmp.dts
+awk -F"=" -v newval="$data" '{ if (NR == 57) print newval ; else print $0}' lan865x-overlay-tmp.dts > lan865x-overlay-tmp-tmp.dts
 mv lan865x-overlay-tmp-tmp.dts lan865x-overlay-tmp.dts
 else
 echo "Invalid input...!"
@@ -311,13 +321,43 @@ read rx_cut_through_1
 if [[ $rx_cut_through_1 == 0 ]] || [[ $rx_cut_through_1 == 1 ]]
 then
 data="                                rx-cut-through-mode = /bits/ 8 <$rx_cut_through_1>; /* 1 - Rx cut through mode enable, 0 - Store and forward mode enable */"
-awk -F"=" -v newval="$data" '{ if (NR == 56) print newval ; else print $0}' lan865x-overlay-tmp.dts > lan865x-overlay-tmp-tmp.dts
+awk -F"=" -v newval="$data" '{ if (NR == 58) print newval ; else print $0}' lan865x-overlay-tmp.dts > lan865x-overlay-tmp-tmp.dts
 mv lan865x-overlay-tmp-tmp.dts lan865x-overlay-tmp.dts
 else
 echo "Invalid input...!"
 read -p "Press Enter key to continue...!"
 fi
+
 elif [ $option == 9 ]
+then
+echo "Enter OA chunk size [32 or 64]"
+read oa_chunk_size_1
+if [[ $oa_chunk_size_1 == 32 ]] || [[ $oa_chunk_size_1 == 64 ]]
+then
+data="                                oa-chunk-size = /bits/ 8 <$oa_chunk_size_1>;"
+awk -F"=" -v newval="$data" '{ if (NR == 59) print newval ; else print $0}' lan865x-overlay-tmp.dts > lan865x-overlay-tmp-tmp.dts
+mv lan865x-overlay-tmp-tmp.dts lan865x-overlay-tmp.dts
+else
+echo "Invalid input...!"
+read -p "Press Enter key to continue...!"
+fi
+
+elif [ $option == 10 ]
+then
+echo "Enter OA protected [0-disable, 1-enable]"
+read oa_protected_1
+if [[ $oa_protected_1 == 0 ]] || [[ $oa_protected_1 == 1 ]]
+then
+data="                                oa-protected = /bits/ 8 <$oa_protected_1>;"
+awk -F"=" -v newval="$data" '{ if (NR == 60) print newval ; else print $0}' lan865x-overlay-tmp.dts > lan865x-overlay-tmp-tmp.dts
+mv lan865x-overlay-tmp-tmp.dts lan865x-overlay-tmp.dts
+else
+echo "Invalid input...!"
+read -p "Press Enter key to continue...!"
+fi
+
+
+elif [ $option == 11 ]
 then
 echo "Enter the MAC address:"
 read mac_addr_1
@@ -325,24 +365,24 @@ mac_addr_1_tmp=$mac_addr_1
 if [[ $mac_addr_1 =~ ^([[:xdigit:]]{2}:){5}[[:xdigit:]]{2}$ ]]; then
 mac_addr_1=$(echo "$mac_addr_1" | sed -r 's/[:]+/ /g')
 data="                                local-mac-address = [$mac_addr_1];"
-awk -F"=" -v newval="$data" '{ if (NR == 46) print newval ; else print $0}' lan865x-overlay-tmp.dts > lan865x-overlay-tmp-tmp.dts
+awk -F"=" -v newval="$data" '{ if (NR == 48) print newval ; else print $0}' lan865x-overlay-tmp.dts > lan865x-overlay-tmp-tmp.dts
 mv lan865x-overlay-tmp-tmp.dts lan865x-overlay-tmp.dts
 data="mac_addr_1=$mac_addr_1_tmp"
-awk -F"=" -v newval="$data" '{ if (NR == 7) print newval ; else print $0}' load-tmp.sh > load-tmp_tmp.sh
+awk -F"=" -v newval="$data" '{ if (NR == 8) print newval ; else print $0}' load-tmp.sh > load-tmp_tmp.sh
 mv load-tmp_tmp.sh load-tmp.sh
 chmod +x load-tmp.sh
 else
 echo "Invalid MAC address...!"
 read -p "Press Enter key to continue...!"
 fi
-elif [ $option == 10 ]
+elif [ $option == 12 ]
 then
 echo "Enter 1st LAN865x (eth1) IP address:"
 read input
 if [[ "$input" =~ ^(([1-9]?[0-9]|1[0-9][0-9]|2([0-4][0-9]|5[0-5]))\.){3}([1-9]?[0-9]|1[0-9][0-9]|2([0-4][0-9]|5[0-5]))$ ]]; then
 ip_addr_1=$input
 data="ip_addr_1=$ip_addr_1"
-awk -F"=" -v newval="$data" '{ if (NR == 8) print newval ; else print $0}' load-tmp.sh > load-tmp_tmp.sh
+awk -F"=" -v newval="$data" '{ if (NR == 9) print newval ; else print $0}' load-tmp.sh > load-tmp_tmp.sh
 mv load-tmp_tmp.sh load-tmp.sh
 chmod +x load-tmp.sh
 else
@@ -350,14 +390,14 @@ echo "Invalid IP...!"
 read -p "Press Enter key to continue...!"
 fi
 
-elif [ $option == 11 ]
+elif [ $option == 13 ]
 then
 echo "Enter 1st LAN865x (eth1) Subnet mask:"
 read input
 if [[ "$input" =~ ^(([1-9]?[0-9]|1[0-9][0-9]|2([0-4][0-9]|5[0-5]))\.){3}([1-9]?[0-9]|1[0-9][0-9]|2([0-4][0-9]|5[0-5]))$ ]]; then
 subnet_mask_1=$input
 data="subnet_mask_1=$subnet_mask_1"
-awk -F"=" -v newval="$data" '{ if (NR == 9) print newval ; else print $0}' load-tmp.sh > load-tmp_tmp.sh
+awk -F"=" -v newval="$data" '{ if (NR == 10) print newval ; else print $0}' load-tmp.sh > load-tmp_tmp.sh
 mv load-tmp_tmp.sh load-tmp.sh
 chmod +x load-tmp.sh
 else
@@ -365,7 +405,7 @@ echo "Invalid Subnet mask...!"
 read -p "Press Enter key to continue...!"
 fi
 
-elif [ $option == 12 ]
+elif [ $option == 14 ]
 then
 	save_configure
 	read -p "Press Enter key to continue...!"
@@ -387,7 +427,7 @@ configure_lan865x_2(){
 while [ 1 ];
 do
 printf "\033c"
-echo "2nd LAN865x PLCA Settings:"
+echo "2nd LAN865x Settings:"
 echo "--------------------------"
 
 v1="$(awk '{if(NR==28) print $5}' lan865x-overlay-tmp.dts)"
@@ -430,24 +470,34 @@ v2=$(echo $v1 | awk -F[='<''>'] '{print $2}')
 rx_cut_through_2=$v2
 echo "	8. Rx cut through	: $v2"
 
+v1="$(awk '{if(NR==36) print $5}' lan865x-overlay-tmp.dts)"
+v2=$(echo $v1 | awk -F[='<''>'] '{print $2}')
+oa_chunk_size_2=$v2
+echo "	9. OA chunk size	: $v2"
+
+v1="$(awk '{if(NR==37) print $5}' lan865x-overlay-tmp.dts)"
+v2=$(echo $v1 | awk -F[='<''>'] '{print $2}')
+oa_protected_2=$v2
+echo "	10. OA protected	: $v2"
+
 v1="$(awk '{if(NR==25) print $0}' lan865x-overlay-tmp.dts)"
 v2=$(grep -oP '= \K.*?(?=;)' <<< "$v1")
 v2=$(echo "$v2" | sed -r 's/[ ]+/:/g')
 v2=${v2:1}
 v2=${v2:0:17}
-echo "	9. MAC address		: $v2"
-
-v1="$(awk '{if(NR==12) print $0}' load-tmp.sh)"
-v2=$(cut -d "=" -f2- <<< $v1)
-ip_addr_2=$v2
-echo "	10. IP address		: $ip_addr_2"
+echo "	11. MAC address		: $v2"
 
 v1="$(awk '{if(NR==13) print $0}' load-tmp.sh)"
+v2=$(cut -d "=" -f2- <<< $v1)
+ip_addr_2=$v2
+echo "	12. IP address		: $ip_addr_2"
+
+v1="$(awk '{if(NR==14) print $0}' load-tmp.sh)"
 v2=$(cut -d "=" -f2 <<< "$v1")
 subnet_mask_2=$v2
-echo "	11. Subnet mask		: $subnet_mask_2"
+echo "	13. Subnet mask		: $subnet_mask_2"
 
-echo "	12. Save & Configure"
+echo "	14. Save & Configure"
 
 echo "	99. Back
 	0. Exit"
@@ -614,7 +664,36 @@ else
 echo "Invalid input...!"
 read -p "Press Enter key to continue...!"
 fi
+
 elif [ $option == 9 ]
+then
+echo "Enter OA chunk size [32 or 64]"
+read oa_chunk_size_2
+if [[ $oa_chunk_size_2 == 32 ]] || [[ $oa_chunk_size_2 == 64 ]]
+then
+data="                                oa-chunk-size = /bits/ 8 <$oa_chunk_size_2>;"
+awk -F"=" -v newval="$data" '{ if (NR == 36) print newval ; else print $0}' lan865x-overlay-tmp.dts > lan865x-overlay-tmp-tmp.dts
+mv lan865x-overlay-tmp-tmp.dts lan865x-overlay-tmp.dts
+else
+echo "Invalid input...!"
+read -p "Press Enter key to continue...!"
+fi
+
+elif [ $option == 10 ]
+then
+echo "Enter OA protected [0-disable, 1-enable]"
+read oa_protected_2
+if [[ $oa_protected_2 == 0 ]] || [[ $oa_protected_2 == 1 ]]
+then
+data="                                oa-protected = /bits/ 8 <$oa_protected_2>;"
+awk -F"=" -v newval="$data" '{ if (NR == 37) print newval ; else print $0}' lan865x-overlay-tmp.dts > lan865x-overlay-tmp-tmp.dts
+mv lan865x-overlay-tmp-tmp.dts lan865x-overlay-tmp.dts
+else
+echo "Invalid input...!"
+read -p "Press Enter key to continue...!"
+fi
+
+elif [ $option == 11 ]
 then
 echo "Enter the MAC address:"
 read mac_addr_2
@@ -625,21 +704,21 @@ data="                                local-mac-address = [$mac_addr_2];"
 awk -F"=" -v newval="$data" '{ if (NR == 25) print newval ; else print $0}' lan865x-overlay-tmp.dts > lan865x-overlay-tmp-tmp.dts
 mv lan865x-overlay-tmp-tmp.dts lan865x-overlay-tmp.dts
 data="mac_addr_2=$mac_addr_2_tmp"
-awk -F"=" -v newval="$data" '{ if (NR == 11) print newval ; else print $0}' load-tmp.sh > load-tmp_tmp.sh
+awk -F"=" -v newval="$data" '{ if (NR == 12) print newval ; else print $0}' load-tmp.sh > load-tmp_tmp.sh
 mv load-tmp_tmp.sh load-tmp.sh
 chmod +x load-tmp.sh
 else
 echo "Invalid MAC address...!"
 read -p "Press Enter key to continue...!"
 fi
-elif [ $option == 10 ]
+elif [ $option == 12 ]
 then
 echo "Enter 2nd LAN865x (eth2) IP address:"
 read input
 if [[ "$input" =~ ^(([1-9]?[0-9]|1[0-9][0-9]|2([0-4][0-9]|5[0-5]))\.){3}([1-9]?[0-9]|1[0-9][0-9]|2([0-4][0-9]|5[0-5]))$ ]]; then
 ip_addr_2=$input
 data="ip_addr_2=$ip_addr_2"
-awk -F"=" -v newval="$data" '{ if (NR == 12) print newval ; else print $0}' load-tmp.sh > load-tmp_tmp.sh
+awk -F"=" -v newval="$data" '{ if (NR == 13) print newval ; else print $0}' load-tmp.sh > load-tmp_tmp.sh
 mv load-tmp_tmp.sh load-tmp.sh
 chmod +x load-tmp.sh
 else
@@ -647,14 +726,14 @@ echo "Invalid IP...!"
 read -p "Press Enter key to continue...!"
 fi
 
-elif [ $option == 11 ]
+elif [ $option == 13 ]
 then
 echo "Enter 2nd LAN865x (eth2) Subnet mask:"
 read input
 if [[ "$input" =~ ^(([1-9]?[0-9]|1[0-9][0-9]|2([0-4][0-9]|5[0-5]))\.){3}([1-9]?[0-9]|1[0-9][0-9]|2([0-4][0-9]|5[0-5]))$ ]]; then
 subnet_mask_2=$input
 data="subnet_mask_2=$subnet_mask_2"
-awk -F"=" -v newval="$data" '{ if (NR == 13) print newval ; else print $0}' load-tmp.sh > load-tmp_tmp.sh
+awk -F"=" -v newval="$data" '{ if (NR == 14) print newval ; else print $0}' load-tmp.sh > load-tmp_tmp.sh
 mv load-tmp_tmp.sh load-tmp.sh
 chmod +x load-tmp.sh
 else
@@ -662,7 +741,7 @@ echo "Invalid Subnet mask...!"
 read -p "Press Enter key to continue...!"
 fi
 
-elif [ $option == 12 ]
+elif [ $option == 14 ]
 then
 	save_configure
 	read -p "Press Enter key to continue...!"

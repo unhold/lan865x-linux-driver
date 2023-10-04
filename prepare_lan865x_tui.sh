@@ -114,6 +114,14 @@ v1="$(awk '{if(NR==35) print $5}' lan865x-overlay-tmp.dts)"
 v2=$(echo $v1 | awk -F[='<''>'] '{print $2}')
 rx_cut_through_2=$v2
 
+v1="$(awk '{if(NR==36) print $5}' lan865x-overlay-tmp.dts)"
+v2=$(echo $v1 | awk -F[='<''>'] '{print $2}')
+oa_chunk_size_2=$v2
+
+v1="$(awk '{if(NR==37) print $5}' lan865x-overlay-tmp.dts)"
+v2=$(echo $v1 | awk -F[='<''>'] '{print $2}')
+oa_protected_2=$v2
+
 v1="$(awk '{if(NR==25) print $0}' lan865x-overlay-tmp.dts)"
 v2=$(grep -oP '= \K.*?(?=;)' <<< "$v1")
 v2=$(echo "$v2" | sed -r 's/[ ]+/:/g')
@@ -121,11 +129,11 @@ v2=${v2:1}
 v2=${v2:0:17}
 mac_addr_2=$v2
 
-v1="$(awk '{if(NR==12) print $0}' load-tmp.sh)"
+v1="$(awk '{if(NR==13) print $0}' load-tmp.sh)"
 v2=$(cut -d "=" -f2- <<< $v1)
 ip_addr_2=$v2
 
-v1="$(awk '{if(NR==13) print $0}' load-tmp.sh)"
+v1="$(awk '{if(NR==14) print $0}' load-tmp.sh)"
 v2=$(cut -d "=" -f2 <<< "$v1")
 subnet_mask_2=$v2
 
@@ -141,9 +149,11 @@ subnet_mask_2=$v2
 	      "6. PLCA TO Timer (0x0-0xFF)"			"$plca_to_timer_2" \
 	      "7. Tx Cut Through Mode (0-disable, 1-enable)"	"$tx_cut_through_2" \
 	      "8. Rx Cut Through Mode (0-disable, 1-enable)"	"$rx_cut_through_2" \
-	      "9. MAC Address (Ex format: 11:22:33:44:55:66)"	"$mac_addr_2" \
-	      "10. IP Address (Ex format: 192.168.1.10)"	"$ip_addr_2" \
-	      "11. Subnet Mask (Ex format: 255.255.255.0)"	"$subnet_mask_2" \
+	      "9. OA Chunk Size (32 or 64)"			"$oa_chunk_size_2" \
+	      "10. OA Protected (0-disable, 1-enable)"		"$oa_protected_2" \
+	      "11. MAC Address (Ex format: 11:22:33:44:55:66)"	"$mac_addr_2" \
+	      "12. IP Address (Ex format: 192.168.1.10)"	"$ip_addr_2" \
+	      "13. Subnet Mask (Ex format: 255.255.255.0)"	"$subnet_mask_2" \
 	      2>&1 1>&3 `
 
 	      returncode_2nd=$?
@@ -274,7 +284,27 @@ subnet_mask_2=$v2
 				else
 				dialog --title "Error" --clear "$@" --msgbox "Invalid Rx Cut Through Mode Configuration" 10 30
 				fi;;
-	      		"9. MAC Address (Ex format: 11:22:33:44:55:66")
+			"9. OA Chunk Size (32 or 64")
+				if [[ $item == 32 ]] || [[ $item == 64 ]]
+				then
+				oa_chunk_size_2=$item
+				data="                                oa-chunk-size = /bits/ 8 <$oa_chunk_size_2>;"
+				awk -F"=" -v newval="$data" '{ if (NR == 36) print newval ; else print $0}' lan865x-overlay-tmp.dts > lan865x-overlay-tmp-tmp.dts
+				mv lan865x-overlay-tmp-tmp.dts lan865x-overlay-tmp.dts
+				else
+				dialog --title "Error" --clear "$@" --msgbox "Invalid OA chunk size" 10 30
+				fi;;
+			"10. OA Protected (0-disable, 1-enable")
+				if [[ $item == 0 ]] || [[ $item == 1 ]]
+				then
+				oa_protected_2=$item
+				data="                                oa-protected = /bits/ 8 <$oa_protected_2>;"
+				awk -F"=" -v newval="$data" '{ if (NR == 37) print newval ; else print $0}' lan865x-overlay-tmp.dts > lan865x-overlay-tmp-tmp.dts
+				mv lan865x-overlay-tmp-tmp.dts lan865x-overlay-tmp.dts
+				else
+				dialog --title "Error" --clear "$@" --msgbox "Invalid OA protected" 10 30
+				fi;;
+			"11. MAC Address (Ex format: 11:22:33:44:55:66")
 				if [[ $item =~ ^([[:xdigit:]]{2}:){5}[[:xdigit:]]{2}$ ]]; then
 				mac_addr_2=$item
 				mac_addr_2_tmp=$mac_addr_2
@@ -289,21 +319,21 @@ subnet_mask_2=$v2
 				else
 				dialog --title "Error" --clear "$@" --msgbox "Invalid MAC Address Configuration" 10 30
 				fi;;
-			"10. IP Address (Ex format: 192.168.1.10")
+			"12. IP Address (Ex format: 192.168.1.10")
 				if [[ "$item" =~ ^(([1-9]?[0-9]|1[0-9][0-9]|2([0-4][0-9]|5[0-5]))\.){3}([1-9]?[0-9]|1[0-9][0-9]|2([0-4][0-9]|5[0-5]))$ ]]; then
 				ip_addr_2=$item
 				data="ip_addr_2=$ip_addr_2"
-				awk -F"=" -v newval="$data" '{ if (NR == 12) print newval ; else print $0}' load-tmp.sh > load-tmp_tmp.sh
+				awk -F"=" -v newval="$data" '{ if (NR == 13) print newval ; else print $0}' load-tmp.sh > load-tmp_tmp.sh
 				mv load-tmp_tmp.sh load-tmp.sh
 				chmod +x load-tmp.sh
 				else
 				dialog --title "Error" --clear "$@" --msgbox "Invalid IP Address Configuration" 10 30
 				fi;;
-			"11. Subnet Mask (Ex format: 255.255.255.0")
+			"13. Subnet Mask (Ex format: 255.255.255.0")
 				if [[ "$item" =~ ^(([1-9]?[0-9]|1[0-9][0-9]|2([0-4][0-9]|5[0-5]))\.){3}([1-9]?[0-9]|1[0-9][0-9]|2([0-4][0-9]|5[0-5]))$ ]]; then
 				subnet_mask_2=$item
 				data="subnet_mask_2=$subnet_mask_2"
-				awk -F"=" -v newval="$data" '{ if (NR == 13) print newval ; else print $0}' load-tmp.sh > load-tmp_tmp.sh
+				awk -F"=" -v newval="$data" '{ if (NR == 14) print newval ; else print $0}' load-tmp.sh > load-tmp_tmp.sh
 				mv load-tmp_tmp.sh load-tmp.sh
 				chmod +x load-tmp.sh
 				else
@@ -336,50 +366,58 @@ returncode_1st=0
 
 while [ "${returncode_1st:-99}" -ne 1 ] && [ "${returncode_1st:-99}" -ne 250 ]; do
 	exec 3>&1
-v1="$(awk '{if(NR==49) print $5}' lan865x-overlay-tmp.dts)"
+v1="$(awk '{if(NR==51) print $5}' lan865x-overlay-tmp.dts)"
 v2=$(echo $v1 | awk -F[='<''>'] '{print $2}')
 plca_mode_1=$v2
 
-v1="$(awk '{if(NR==50) print $5}' lan865x-overlay-tmp.dts)"
+v1="$(awk '{if(NR==52) print $5}' lan865x-overlay-tmp.dts)"
 v2=$(echo $v1 | awk -F[='<''>'] '{print $2}')
 plca_node_id_1=$v2
 
-v1="$(awk '{if(NR==51) print $5}' lan865x-overlay-tmp.dts)"
+v1="$(awk '{if(NR==53) print $5}' lan865x-overlay-tmp.dts)"
 v2=$(echo $v1 | awk -F[='<''>'] '{print $2}')
 plca_node_count_1=$v2
 
-v1="$(awk '{if(NR==52) print $5}' lan865x-overlay-tmp.dts)"
+v1="$(awk '{if(NR==54) print $5}' lan865x-overlay-tmp.dts)"
 v2=$(echo $v1 | awk -F[='<''>'] '{print $2}')
 plca_burst_count_1=$v2
 
-v1="$(awk '{if(NR==53) print $5}' lan865x-overlay-tmp.dts)"
+v1="$(awk '{if(NR==55) print $5}' lan865x-overlay-tmp.dts)"
 v2=$(echo $v1 | awk -F[='<''>'] '{print $2}')
 plca_burst_timer_1=$v2
 
-v1="$(awk '{if(NR==54) print $5}' lan865x-overlay-tmp.dts)"
+v1="$(awk '{if(NR==56) print $5}' lan865x-overlay-tmp.dts)"
 v2=$(echo $v1 | awk -F[='<''>'] '{print $2}')
 plca_to_timer_1=$v2
 
-v1="$(awk '{if(NR==55) print $5}' lan865x-overlay-tmp.dts)"
+v1="$(awk '{if(NR==57) print $5}' lan865x-overlay-tmp.dts)"
 v2=$(echo $v1 | awk -F[='<''>'] '{print $2}')
 tx_cut_through_1=$v2
 
-v1="$(awk '{if(NR==56) print $5}' lan865x-overlay-tmp.dts)"
+v1="$(awk '{if(NR==58) print $5}' lan865x-overlay-tmp.dts)"
 v2=$(echo $v1 | awk -F[='<''>'] '{print $2}')
 rx_cut_through_1=$v2
 
-v1="$(awk '{if(NR==46) print $0}' lan865x-overlay-tmp.dts)"
+v1="$(awk '{if(NR==59) print $5}' lan865x-overlay-tmp.dts)"
+v2=$(echo $v1 | awk -F[='<''>'] '{print $2}')
+oa_chunk_size_1=$v2
+
+v1="$(awk '{if(NR==60) print $5}' lan865x-overlay-tmp.dts)"
+v2=$(echo $v1 | awk -F[='<''>'] '{print $2}')
+oa_protected_1=$v2
+
+v1="$(awk '{if(NR==48) print $0}' lan865x-overlay-tmp.dts)"
 v2=$(grep -oP '= \K.*?(?=;)' <<< "$v1")
 v2=$(echo "$v2" | sed -r 's/[ ]+/:/g')
 v2=${v2:1}
 v2=${v2:0:17}
 mac_addr_1=$v2
 
-v1="$(awk '{if(NR==8) print $0}' load-tmp.sh)"
+v1="$(awk '{if(NR==9) print $0}' load-tmp.sh)"
 v2=$(cut -d "=" -f2- <<< $v1)
 ip_addr_1=$v2
 
-v1="$(awk '{if(NR==9) print $0}' load-tmp.sh)"
+v1="$(awk '{if(NR==10) print $0}' load-tmp.sh)"
 v2=$(cut -d "=" -f2 <<< "$v1")
 subnet_mask_1=$v2
 
@@ -395,9 +433,11 @@ subnet_mask_1=$v2
 	      "6. PLCA TO Timer (0x0-0xFF)"			"$plca_to_timer_1" \
 	      "7. Tx Cut Through Mode (0-disable, 1-enable)"	"$tx_cut_through_1" \
 	      "8. Rx Cut Through Mode (0-disable, 1-enable)"	"$rx_cut_through_1" \
-	      "9. MAC Address (Ex format: 11:22:33:44:55:66)"	"$mac_addr_1" \
-	      "10. IP Address (Ex format: 192.168.1.10)"	"$ip_addr_1" \
-	      "11. Subnet Mask (Ex format: 255.255.255.0)"	"$subnet_mask_1" \
+	      "9. OA Chunk Size (32 or 64)"			"$oa_chunk_size_1" \
+	      "10. OA Protected (0-disable, 1-enable)"		"$oa_protected_1" \
+	      "11. MAC Address (Ex format: 11:22:33:44:55:66)"	"$mac_addr_1" \
+	      "12. IP Address (Ex format: 192.168.1.10)"	"$ip_addr_1" \
+	      "13. Subnet Mask (Ex format: 255.255.255.0)"	"$subnet_mask_1" \
 	      2>&1 1>&3 `
 
 	      returncode_1st=$?
@@ -429,7 +469,7 @@ subnet_mask_1=$v2
 				then
 				plca_mode_1=$item
 				data="                                plca-enable = /bits/ 8 <$plca_mode_1>; /* 1 - PLCA enable, 0 - CSMA/CD enable */"
-				awk -F"=" -v newval="$data" '{ if (NR == 49) print newval ; else print $0}' lan865x-overlay-tmp.dts > lan865x-overlay-tmp-tmp.dts
+				awk -F"=" -v newval="$data" '{ if (NR == 51) print newval ; else print $0}' lan865x-overlay-tmp.dts > lan865x-overlay-tmp-tmp.dts
 				mv lan865x-overlay-tmp-tmp.dts lan865x-overlay-tmp.dts
 				else
 				dialog --title "Error" --clear "$@" --msgbox "Invalid PLCA Mode Configuration" 10 30
@@ -445,7 +485,7 @@ subnet_mask_1=$v2
 				else
 				plca_node_id_1=$item
 				data="                                plca-node-id = /bits/ 8 <$plca_node_id_1>; /* PLCA node id range: 0 to 254 */"
-				awk -F"=" -v newval="$data" '{ if (NR == 50) print newval ; else print $0}' lan865x-overlay-tmp.dts > lan865x-overlay-tmp-tmp.dts
+				awk -F"=" -v newval="$data" '{ if (NR == 52) print newval ; else print $0}' lan865x-overlay-tmp.dts > lan865x-overlay-tmp-tmp.dts
 				mv lan865x-overlay-tmp-tmp.dts lan865x-overlay-tmp.dts
 				fi
 				fi;;
@@ -460,7 +500,7 @@ subnet_mask_1=$v2
 				else
 				plca_node_count_1=$item
 				data="                                plca-node-count = /bits/ 8 <$plca_node_count_1>; /* PLCA node count range: 1 to 255 */"
-				awk -F"=" -v newval="$data" '{ if (NR == 51) print newval ; else print $0}' lan865x-overlay-tmp.dts > lan865x-overlay-tmp-tmp.dts
+				awk -F"=" -v newval="$data" '{ if (NR == 53) print newval ; else print $0}' lan865x-overlay-tmp.dts > lan865x-overlay-tmp-tmp.dts
 				mv lan865x-overlay-tmp-tmp.dts lan865x-overlay-tmp.dts
 				fi
 				fi;;
@@ -476,7 +516,7 @@ subnet_mask_1=$v2
 				else
 				plca_burst_count_1=0x$item
 				data="                                plca-burst-count = /bits/ 8 <$plca_burst_count_1>; /* PLCA burst count range: 0x0 to 0xFF */"
-				awk -F"=" -v newval="$data" '{ if (NR == 52) print newval ; else print $0}' lan865x-overlay-tmp.dts > lan865x-overlay-tmp-tmp.dts
+				awk -F"=" -v newval="$data" '{ if (NR == 54) print newval ; else print $0}' lan865x-overlay-tmp.dts > lan865x-overlay-tmp-tmp.dts
 				mv lan865x-overlay-tmp-tmp.dts lan865x-overlay-tmp.dts
 				fi;;
 	      		"5. PLCA Burst Timer (0x0-0xFF")		
@@ -491,7 +531,7 @@ subnet_mask_1=$v2
 				else
 				plca_burst_timer_1=0x$item
 				data="                                plca-burst-timer = /bits/ 8 <$plca_burst_timer_1>; /* PLCA burst timer */"
-				awk -F"=" -v newval="$data" '{ if (NR == 53) print newval ; else print $0}' lan865x-overlay-tmp.dts > lan865x-overlay-tmp-tmp.dts
+				awk -F"=" -v newval="$data" '{ if (NR == 55) print newval ; else print $0}' lan865x-overlay-tmp.dts > lan865x-overlay-tmp-tmp.dts
 				mv lan865x-overlay-tmp-tmp.dts lan865x-overlay-tmp.dts
 				fi;;
 	      		"6. PLCA TO Timer (0x0-0xFF")			
@@ -506,7 +546,7 @@ subnet_mask_1=$v2
 				else
 				plca_to_timer_1=0x$item
 				data="                                plca-to-timer = /bits/ 8 <0x$plca_to_timer_1>; /* PLCA TO timer */"
-				awk -F"=" -v newval="$data" '{ if (NR == 54) print newval ; else print $0}' lan865x-overlay-tmp.dts > lan865x-overlay-tmp-tmp.dts
+				awk -F"=" -v newval="$data" '{ if (NR == 56) print newval ; else print $0}' lan865x-overlay-tmp.dts > lan865x-overlay-tmp-tmp.dts
 				mv lan865x-overlay-tmp-tmp.dts lan865x-overlay-tmp.dts
 				fi;;
 
@@ -515,7 +555,7 @@ subnet_mask_1=$v2
 				then
 				tx_cut_through_1=$item
 				data="                                tx-cut-through-mode = /bits/ 8 <$tx_cut_through_1>; /* 1 - Tx cut through mode enable, 0 - Store and forward mode enable */"
-				awk -F"=" -v newval="$data" '{ if (NR == 55) print newval ; else print $0}' lan865x-overlay-tmp.dts > lan865x-overlay-tmp-tmp.dts
+				awk -F"=" -v newval="$data" '{ if (NR == 57) print newval ; else print $0}' lan865x-overlay-tmp.dts > lan865x-overlay-tmp-tmp.dts
 				mv lan865x-overlay-tmp-tmp.dts lan865x-overlay-tmp.dts
 				else
 				dialog --title "Error" --clear "$@" --msgbox "Invalid Tx Cut Through Mode Configuration" 10 30
@@ -525,18 +565,38 @@ subnet_mask_1=$v2
 				then
 				rx_cut_through_1=$item
 				data="                                rx-cut-through-mode = /bits/ 8 <$rx_cut_through_1>; /* 1 - Rx cut through mode enable, 0 - Store and forward mode enable */"
-				awk -F"=" -v newval="$data" '{ if (NR == 56) print newval ; else print $0}' lan865x-overlay-tmp.dts > lan865x-overlay-tmp-tmp.dts
+				awk -F"=" -v newval="$data" '{ if (NR == 58) print newval ; else print $0}' lan865x-overlay-tmp.dts > lan865x-overlay-tmp-tmp.dts
 				mv lan865x-overlay-tmp-tmp.dts lan865x-overlay-tmp.dts
 				else
 				dialog --title "Error" --clear "$@" --msgbox "Invalid Rx Cut Through Mode Configuration" 10 30
 				fi;;
-	      		"9. MAC Address (Ex format: 11:22:33:44:55:66")
+			"9. OA Chunk Size (32 or 64")
+				if [[ $item == 32 ]] || [[ $item == 64 ]]
+				then
+				oa_chunk_size_1=$item
+				data="                                oa-chunk-size = /bits/ 8 <$oa_chunk_size_1>;"
+				awk -F"=" -v newval="$data" '{ if (NR == 59) print newval ; else print $0}' lan865x-overlay-tmp.dts > lan865x-overlay-tmp-tmp.dts
+				mv lan865x-overlay-tmp-tmp.dts lan865x-overlay-tmp.dts
+				else
+				dialog --title "Error" --clear "$@" --msgbox "Invalid OA chunk size" 10 30
+				fi;;
+			"10. OA Protected (0-disable, 1-enable")
+				if [[ $item == 0 ]] || [[ $item == 1 ]]
+				then
+				oa_protected_1=$item
+				data="                                oa-protected = /bits/ 8 <$oa_protected_1>;"
+				awk -F"=" -v newval="$data" '{ if (NR == 60) print newval ; else print $0}' lan865x-overlay-tmp.dts > lan865x-overlay-tmp-tmp.dts
+				mv lan865x-overlay-tmp-tmp.dts lan865x-overlay-tmp.dts
+				else
+				dialog --title "Error" --clear "$@" --msgbox "Invalid OA protected" 10 30
+				fi;;
+			"11. MAC Address (Ex format: 11:22:33:44:55:66")
 				if [[ $item =~ ^([[:xdigit:]]{2}:){5}[[:xdigit:]]{2}$ ]]; then
 				mac_addr_1=$item
 				mac_addr_1_tmp=$mac_addr_1
 				mac_addr_1=$(echo "$mac_addr_1" | sed -r 's/[:]+/ /g')
 				data="                                local-mac-address = [$mac_addr_1];"
-				awk -F"=" -v newval="$data" '{ if (NR == 46) print newval ; else print $0}' lan865x-overlay-tmp.dts > lan865x-overlay-tmp-tmp.dts
+				awk -F"=" -v newval="$data" '{ if (NR == 48) print newval ; else print $0}' lan865x-overlay-tmp.dts > lan865x-overlay-tmp-tmp.dts
 				mv lan865x-overlay-tmp-tmp.dts lan865x-overlay-tmp.dts
 				data="mac_addr_1=$mac_addr_1_tmp"
 				awk -F"=" -v newval="$data" '{ if (NR == 7) print newval ; else print $0}' load-tmp.sh > load-tmp_tmp.sh
@@ -545,21 +605,21 @@ subnet_mask_1=$v2
 				else
 				dialog --title "Error" --clear "$@" --msgbox "Invalid MAC Address Configuration" 10 30
 				fi;;
-			"10. IP Address (Ex format: 192.168.1.10")
+			"12. IP Address (Ex format: 192.168.1.10")
 				if [[ "$item" =~ ^(([1-9]?[0-9]|1[0-9][0-9]|2([0-4][0-9]|5[0-5]))\.){3}([1-9]?[0-9]|1[0-9][0-9]|2([0-4][0-9]|5[0-5]))$ ]]; then
 				ip_addr_1=$item
 				data="ip_addr_1=$ip_addr_1"
-				awk -F"=" -v newval="$data" '{ if (NR == 8) print newval ; else print $0}' load-tmp.sh > load-tmp_tmp.sh
+				awk -F"=" -v newval="$data" '{ if (NR == 9) print newval ; else print $0}' load-tmp.sh > load-tmp_tmp.sh
 				mv load-tmp_tmp.sh load-tmp.sh
 				chmod +x load-tmp.sh
 				else
 				dialog --title "Error" --clear "$@" --msgbox "Invalid IP Address Configuration" 10 30
 				fi;;
-			"11. Subnet Mask (Ex format: 255.255.255.0")
+			"13. Subnet Mask (Ex format: 255.255.255.0")
 				if [[ "$item" =~ ^(([1-9]?[0-9]|1[0-9][0-9]|2([0-4][0-9]|5[0-5]))\.){3}([1-9]?[0-9]|1[0-9][0-9]|2([0-4][0-9]|5[0-5]))$ ]]; then
 				subnet_mask_1=$item
 				data="subnet_mask_1=$subnet_mask_1"
-				awk -F"=" -v newval="$data" '{ if (NR == 9) print newval ; else print $0}' load-tmp.sh > load-tmp_tmp.sh
+				awk -F"=" -v newval="$data" '{ if (NR == 10) print newval ; else print $0}' load-tmp.sh > load-tmp_tmp.sh
 				mv load-tmp_tmp.sh load-tmp.sh
 				chmod +x load-tmp.sh
 				else

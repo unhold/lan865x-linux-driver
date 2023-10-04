@@ -33,6 +33,8 @@
 				plca-to-timer = /bits/ 8 <0x20>; /* PLCA TO value */
 				tx-cut-through-mode = /bits/ 8 <0>; /* 1 - tx cut through mode enable, 0 - Store and forward mode enable */
 				rx-cut-through-mode = /bits/ 8 <0>; /* 1 - rx cut through mode enable, 0 - Store and forward mode enable */
+				oa-chunk-size = /bits/ 8 <64>;
+				oa-protected = /bits/ 8 <0>;
 				status = "okay";
 			};
 		/* Settings for the lan865x click board connected with Mikro Bus 1 */
@@ -54,6 +56,8 @@
 				plca-to-timer = /bits/ 8 <0x20>; /* PLCA TO value */
 				tx-cut-through-mode = /bits/ 8 <0>; /* 1 - tx cut through mode enable, 0 - Store and forward mode enable */
 				rx-cut-through-mode = /bits/ 8 <0>; /* 1 - rx cut through mode enable, 0 - Store and forward mode enable */
+                                oa-chunk-size = /bits/ 8 <64>;
+                                oa-protected = /bits/ 8 <1>;
 				status = "okay";
 			};
 		};

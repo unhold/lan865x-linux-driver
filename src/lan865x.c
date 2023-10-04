@@ -1,39 +1,32 @@
 // SPDX-License-Identifier: GPL-2.0+
 /*
- * Microchip LAN865x 10BASE-T1S Ethernet driver (MAC + PHY)
+ * Microchip's LAN865x 10BASE-T1S MAC-PHY driver
  *
- * (c) Copyright 2023 Microchip Technology Inc.
  * Author: Parthiban Veerasooran <parthiban.veerasooran@microchip.com>
- * using Open Alliance tc6 library written by Thorsten Kummermehr
- * <thorsten.kummermehr@microchip.com>
  */
 
 #include <linux/module.h>
 #include <linux/kernel.h>
-#include <linux/types.h>
-#include <linux/interrupt.h>
-#include <linux/property.h>
-#include <linux/netdevice.h>
 #include <linux/etherdevice.h>
-#include <linux/ethtool.h>
-#include <linux/spi/spi.h>
-#include <linux/gpio.h>
-#include <linux/kthread.h>
+#include <linux/mdio.h>
+#include <linux/phy.h>
+#include <linux/of.h>
 
-#include "tc6.h"
+#include "oa_tc6.h"
 
 #define DRV_NAME		"lan865x"
-#define DRV_VERSION		"0.1"
+#define DRV_VERSION		"0.2"
 
-#define PLCA_TO_TIMER_VAL	0x20
-#define PLCA_BURST_CNT_VAL	0x00
-#define PLCA_BURST_TMR_VAL	0x80
+#define LAN865X_REV_B0		0x1
+#define LAN865X_REV_B1		0x2
 
-#define REG_STDR_RESET		0x3
-#define REG_STDR_CONFIG0	0x4
-#define REG_STDR_STATUS0	0x8
+#define PHY_ID_LAN865X_REVB	0x0007C1B3
 
-#define REG_MAC_NW_CTRL		0x00010000
+#define REG_STDR_RESET		0x00000003
+#define REG_MAC_ADDR_BO		0x00010022
+#define REG_MAC_ADDR_L		0x00010024
+#define REG_MAC_ADDR_H		0x00010025
+#define REG_MAC_NW_CTRL         0x00010000
 #define REG_MAC_NW_CONFIG	0x00010001
 #define REG_MAC_HASHL		0x00010020
 #define REG_MAC_HASHH		0x00010021
@@ -41,50 +34,40 @@
 #define REG_MAC_ADDR_L		0x00010024
 #define REG_MAC_ADDR_H		0x00010025
 
-#define REG_PHY_PLCA_VER	0x0004ca00
-#define REG_PHY_PLCA_CTRL0	0x0004ca01
-#define REG_PHY_PLCA_CTRL1	0x0004ca02
-#define REG_PHY_PLCA_TOTIME	0x0004ca04
-#define REG_PHY_PLCA_BURST	0x0004ca05
+#define CCS_Q0_TX_CFG		0x000A0081
+#define CCS_Q0_RX_CFG		0x000A0082
+#define REG_CCS_DEVID		0x000A0094
 
-#define MAC_PROMISCUOUS_MODE	0x00000010
-#define MAC_MULTICAST_MODE	0x00000040
-#define MAC_UNICAST_MODE	0x00000080
-#define TX_CUT_THROUGH_MODE	0x9226
-#define TX_STORE_FWD_MODE	0x9026
-#define PLCA_ENABLE		0x8000
-#define ETH_BUF_LEN		1536
-#define ETH_MIN_HEADER_LEN	42
+#define LAN86XX_DISABLE_COL_DET		0x0000
+#define LAN86XX_ENABLE_COL_DET		0x0083
+#define LAN86XX_REG_COL_DET_CTRL0	0x0087
+
+/* Buffer configuration for 32-bytes chunk payload */
+#define CCS_Q0_TX_CFG_32	0x70000000
+#define CCS_Q0_RX_CFG_32	0x30000C00
+
+#define NW_RX_STATUS		BIT(2)
+#define NW_TX_STATUS		BIT(3)
+#define NW_DISABLE		0x0
+
+#define MAC_PROMISCUOUS_MODE	BIT(4)
+#define MAC_MULTICAST_MODE	BIT(6)
+#define MAC_UNICAST_MODE	BIT(7)
+
+#define LAN865X_REV_ID		GENMASK(3, 0)
+
 #define TX_TIMEOUT		(4 * HZ)
-
-#define TX_TS_FLAG_TIMESTAMPING_ENABLED	BIT(0)
-
 #define LAN865X_MSG_DEFAULT	\
 	(NETIF_MSG_PROBE | NETIF_MSG_IFUP | NETIF_MSG_IFDOWN | NETIF_MSG_LINK)
 
-/* driver local data */
 struct lan865x_priv {
-	u8 eth_rx_buf[ETH_BUF_LEN];
-	struct completion tc6_completion;
 	struct net_device *netdev;
 	struct spi_device *spi;
-	struct spi_message msg;
-	struct spi_transfer transfer;
-	/* To synchronize concurrent tc6 service from interrupt and need service operations */
-	struct mutex lock;
-	wait_queue_head_t irq_wq;
-	wait_queue_head_t ns_wq;
-	struct tc6_t tc6;
-	struct timer_list tc6_timer;
-	struct task_struct *ns_task;
-	struct task_struct *irq_task;
-	bool irq_flag;
-	bool ns_flag;
-	bool int_pending;
-	u32 ts_flags;
+	struct oa_tc6 *tc6;
+	struct mii_bus *mdiobus;
+	struct phy_device *phydev;
+	struct device *dev;
 	u32 msg_enable;
-	u32 read_value;
-	u16 eth_rxlength;
 	u8 plca_enable;
 	u8 plca_node_id;
 	u8 plca_node_count;
@@ -93,598 +76,155 @@ struct lan865x_priv {
 	u8 plca_to_timer;
 	u8 tx_cut_thr_mode;
 	u8 rx_cut_thr_mode;
-	bool enable_data;
-	bool spibusy;
-	bool eth_rxinvalid;
-	bool callbacksuccess;
+	u8 cps;
+	u8 protected;
 };
 
-/* use ethtool to change the level for any given device */
 static struct {
 	u32 msg_enable;
 } debug = { -1 };
 
-const struct memorymap_t tc6_memmap[]  =  {
-	{ .address = 0x00000003, .value = 0x00000001, .mask = 0x00000000,
-	  .op = memop_write, .secure = false }, /* RESET */
-	{ .address = 0x00000003, .value = 0x00000001, .mask = 0x00000000,
-	  .op = memop_write, .secure = true  }, /* RESET */
-	{ .address = 0x00000004, .value = 0x00000026, .mask = 0x00000000,
-	  .op = memop_write, .secure = false }, /* CONFIG0 */
-    { .address = 0x00040091, .value = 0x00009660, .mask = 0x00000000,
-	  .op = memop_write, .secure = true  },
-    { .address = 0x00040081, .value = 0x000000C0, .mask = 0x00000000,
-	  .op = memop_write, .secure = true  },
-    { .address = 0x00010077, .value = 0x00000028, .mask = 0x00000000,
-	  .op = memop_write, .secure = true  },
-    { .address = 0x00040043, .value = 0x000000FF, .mask = 0x00000000,
-	  .op = memop_write, .secure = true  },
-    { .address = 0x00040044, .value = 0x0000FFFF, .mask = 0x00000000,
-	  .op = memop_write, .secure = true  },
-    { .address = 0x00040045, .value = 0x00000000, .mask = 0x00000000,
-	  .op = memop_write, .secure = true  },
-    { .address = 0x00040053, .value = 0x000000FF, .mask = 0x00000000,
-	  .op = memop_write, .secure = true  },
-    { .address = 0x00040054, .value = 0x0000FFFF, .mask = 0x00000000,
-	  .op = memop_write, .secure = true  },
-    { .address = 0x00040055, .value = 0x00000000, .mask = 0x00000000,
-	  .op = memop_write, .secure = true  },
-    { .address = 0x00040040, .value = 0x00000002, .mask = 0x00000000,
-	  .op = memop_write, .secure = true  },
-    { .address = 0x00040050, .value = 0x00000002, .mask = 0x00000000,
-	  .op = memop_write, .secure = true  },
-    { .address = 0x000400D0, .value = 0x00005F21, .mask = 0x00000000,
-	  .op = memop_write, .secure = true  },
-    { .address = 0x000400E9, .value = 0x00009E50, .mask = 0x00000000,
-	  .op = memop_write, .secure = true  },
-    { .address = 0x000400F5, .value = 0x00001CF8, .mask = 0x00000000,
-	  .op = memop_write, .secure = true  },
-    { .address = 0x000400F4, .value = 0x0000C020, .mask = 0x00000000,
-	  .op = memop_write, .secure = true  },
-    { .address = 0x000400F8, .value = 0x00009B00, .mask = 0x00000000,
-	  .op = memop_write, .secure = true  },
-    { .address = 0x000400F9, .value = 0x00004E53, .mask = 0x00000000,
-	  .op = memop_write, .secure = true  },
-    { .address = 0x000400B0, .value = 0x00000103, .mask = 0x00000000,
-	  .op = memop_write, .secure = true  },
-    { .address = 0x000400B1, .value = 0x00000910, .mask = 0x00000000,
-	  .op = memop_write, .secure = true  },
-    { .address = 0x000400B2, .value = 0x00001D26, .mask = 0x00000000,
-	  .op = memop_write, .secure = true  },
-    { .address = 0x000400B3, .value = 0x0000002A, .mask = 0x00000000,
-	  .op = memop_write, .secure = true  },
-    { .address = 0x000400B4, .value = 0x00000103, .mask = 0x00000000,
-	  .op = memop_write, .secure = true  },
-    { .address = 0x000400B5, .value = 0x0000070D, .mask = 0x00000000,
-	  .op = memop_write, .secure = true  },
-    { .address = 0x000400B6, .value = 0x00001720, .mask = 0x00000000,
-	  .op = memop_write, .secure = true  },
-    { .address = 0x000400B7, .value = 0x00000027, .mask = 0x00000000,
-	  .op = memop_write, .secure = true  },
-    { .address = 0x000400B8, .value = 0x00000509, .mask = 0x00000000,
-	  .op = memop_write, .secure = true  },
-    { .address = 0x000400B9, .value = 0x00000E13, .mask = 0x00000000,
-	  .op = memop_write, .secure = true  },
-    { .address = 0x000400BA, .value = 0x00001C25, .mask = 0x00000000,
-	  .op = memop_write, .secure = true  },
-    { .address = 0x000400BB, .value = 0x0000002B, .mask = 0x00000000,
-	  .op = memop_write, .secure = true  },
-    { .address = 0x00040087, .value = 0x00000083, .mask = 0x00000000,
-	  .op = memop_write, .secure = true  }, /* COL_DET_CTRL0 */
-    { .address = 0x0000000C, .value = 0x00000100, .mask = 0x00000000,
-	  .op = memop_write, .secure = true  }, /* IMASK0 */
-    { .address = 0x00040081, .value = 0x000000E0, .mask = 0x00000000,
-	  .op = memop_write, .secure = true  }, /* DEEP_SLEEP_CTRL_1 */
-    { .address = 0x00010000, .value = 0x0000000C, .mask = 0x00000000,
-	  .op = memop_write, .secure = true  }, /* NETWORK_CONTROL */
-};
-
-const u32 tc6_memmap_length  =  (sizeof(tc6_memmap) / sizeof(struct memorymap_t));
-/******************************************************************************
- * function name      : tc6_memmap_callback
- * description        : callback function from memmap register operations
- ******************************************************************************/
-void tc6_memmap_callback(struct tc6_t *pinst, bool success, u32 addr,
-		       u32 value, void *ptag, void *pglobaltag)
+static void lan865x_handle_link_change(struct net_device *netdev)
 {
-	struct lan865x_priv *priv = container_of(pinst, struct lan865x_priv, tc6);
-	if (!success && (addr != REG_STDR_RESET)) {
-		if (printk_ratelimit())
-			dev_err(&priv->spi->dev, "spi memmap register failed for addr: %x", addr);
-	}
+	struct lan865x_priv *priv = netdev_priv(netdev);
+
+	phy_print_status(priv->phydev);
 }
 
-/******************************************************************************
- * function name      : tc6_read_callback
- * description        : callback function from register read
- ******************************************************************************/
-void tc6_read_callback(struct tc6_t *pinst, bool success, u32 addr,
-		       u32 value, void *ptag, void *pglobaltag)
+static int lan865x_mdiobus_read(struct mii_bus *bus, int phy_id, int idx)
 {
-	struct lan865x_priv *priv = container_of(pinst, struct lan865x_priv, tc6);
-
-	priv->callbacksuccess = success;
-	priv->read_value = value;
-	complete(&priv->tc6_completion);
-}
-
-/******************************************************************************
- * function name      : tc6_write_callback
- * description        : callback function from register write
- ******************************************************************************/
-void tc6_write_callback(struct tc6_t *pinst, bool success, u32 addr, u32 value,
-			void *ptag, void *pglobaltag)
-{
-	struct lan865x_priv *priv = container_of(pinst, struct lan865x_priv, tc6);
-
-	priv->callbacksuccess = success;
-	complete(&priv->tc6_completion);
-}
-
-/******************************************************************************
- * function name      : tc6_read_register
- * description        : function to read register
- ******************************************************************************/
-bool tc6_read_register(struct lan865x_priv *priv, u32 addr, u32 *value)
-{
-	bool ret;
-	long wait_remaining;
-
-	reinit_completion(&priv->tc6_completion);
-	ret = tc6_readregister(&priv->tc6, addr, tc6_read_callback, priv);
-	if (ret) {
-		priv->ns_flag = true;
-		wake_up_interruptible(&priv->ns_wq);
-		wait_remaining = wait_for_completion_interruptible_timeout(&priv->tc6_completion,
-									   msecs_to_jiffies(100));
-		if ((wait_remaining == 0) || (wait_remaining == -ERESTARTSYS)) {
-			ret = false;
-		} else {
-			*value = priv->read_value;
-			ret = priv->callbacksuccess;
-		}
-	}
-	if (!ret) {
-		if (printk_ratelimit())
-			dev_err(&priv->spi->dev, "spi read register failed for addr: %x", addr);
-	}
-	return ret;
-}
-
-/******************************************************************************
- * function name      : tc6_write_register
- * description        : function to write register
- ******************************************************************************/
-bool tc6_write_register(struct lan865x_priv *priv, u32 addr, u32 value)
-{
-	bool ret;
-	long wait_remaining;
-
-	reinit_completion(&priv->tc6_completion);
-	ret = tc6_writeregister(&priv->tc6, addr, value, tc6_write_callback, priv);
-	if (ret) {
-		priv->ns_flag = true;
-		wake_up_interruptible(&priv->ns_wq);
-		wait_remaining = wait_for_completion_interruptible_timeout(&priv->tc6_completion,
-									   msecs_to_jiffies(100));
-		if ((wait_remaining == 0) || (wait_remaining == -ERESTARTSYS))
-			ret = false;
-		else
-			ret = priv->callbacksuccess;
-	}
-	if (!ret) {
-		if (printk_ratelimit())
-			dev_err(&priv->spi->dev, "spi write register failed for addr: %x", addr);
-	}
-	return ret;
-}
-
-void tc6_cb_onrxethernetslice(struct tc6_t *pinst, const u8 *prx, u16 offset, u16 len,
-			      void *pglobaltag)
-{
-	struct lan865x_priv *priv = container_of(pinst, struct lan865x_priv, tc6);
-
-	if (priv->eth_rxinvalid)
-		return;
-	if (offset + len > ETH_BUF_LEN) {
-		priv->eth_rxinvalid = true;
-		return;
-	}
-	if (offset) {
-		if (!priv->eth_rxlength) {
-			priv->eth_rxinvalid = true;
-			return;
-		}
-	} else {
-		if (priv->eth_rxlength) {
-			priv->eth_rxinvalid = true;
-			return;
-		}
-	}
-	memcpy(priv->eth_rx_buf + offset, prx, len);
-	priv->eth_rxlength += len;
-}
-
-static void send_rx_eth_pkt(struct lan865x_priv *priv, u8 *buf, u16 len, u64 *rxtimestamp)
-{
-	struct sk_buff *skb = NULL;
-
-	skb = netdev_alloc_skb(priv->netdev, len + NET_IP_ALIGN);
-	if (!skb) {
-		if (netif_msg_rx_err(priv)) {
-			if (printk_ratelimit())
-				netdev_err(priv->netdev, "out of memory for rx'd frame");
-		}
-		priv->netdev->stats.rx_dropped++;
-	} else {
-		skb_reserve(skb, NET_IP_ALIGN);
-		/* copy the packet from the receive buffer */
-		memcpy(skb_put(skb, len), buf, len);
-		skb->protocol = eth_type_trans(skb, priv->netdev);
-		/* update statistics */
-		priv->netdev->stats.rx_packets++;
-		priv->netdev->stats.rx_bytes += len;
-		netif_rx_ni(skb);
-	}
-}
-
-void tc6_cb_onrxethernetpacket(struct tc6_t *pinst, bool success, u16 len,
-			       u64 *rxtimestamp, void *pglobaltag)
-{
-	struct lan865x_priv *priv = container_of(pinst, struct lan865x_priv, tc6);
-
-	if (len > ETH_BUF_LEN) {
-		if (printk_ratelimit())
-			dev_err(&priv->spi->dev, "Packet length greater than MTU: %d\n\r", len);
-	}
-
-	if (!success || priv->eth_rxinvalid || !priv->eth_rxlength)
-	{
-		if (printk_ratelimit())
-			dev_err(&priv->spi->dev, "Packet drop\n\r");
-		priv->netdev->stats.rx_dropped++;
-		goto end;
-	}
-
-	if (len < ETH_MIN_HEADER_LEN)
-	{
-		if (printk_ratelimit())
-			dev_err(&priv->spi->dev, "Received invalid small packet length: %d\n\r", len);
-		priv->netdev->stats.rx_dropped++;
-		goto end;
-	}
-	send_rx_eth_pkt(priv, priv->eth_rx_buf, len, rxtimestamp);
-
-end:
-	priv->eth_rxlength = 0;
-	priv->eth_rxinvalid = false;
-}
-
-void tc6_cb_onerror(struct tc6_t *pinst, enum tc6_error_t err, void *pglobaltag)
-{
-	struct lan865x_priv *priv = container_of(pinst, struct lan865x_priv, tc6);
-
-	switch (err) {
-	case tc6error_succeeded:
-		netdev_info(priv->netdev, "no error occurred\n");
-		break;
-	case tc6error_nohardware:
-		netdev_info(priv->netdev, "miso data implies that there is no macphy hardware available\n");
-		break;
-	case tc6error_unexpectedsv:
-		netdev_info(priv->netdev, "unexpected start valid flag\n");
-		break;
-	case tc6error_unexpecteddvev:
-		netdev_info(priv->netdev, "unexpected data valid or end valid flag\n");
-		break;
-	case tc6error_badchecksum:
-		netdev_info(priv->netdev, "checksum in footer is wrong\n");
-		break;
-	case tc6error_unexpectedctrl:
-		netdev_info(priv->netdev, "unexpected control packet received\n");
-		break;
-	case tc6error_badtxdata:
-		netdev_info(priv->netdev, "header bad flag received\n");
-		break;
-	case tc6error_synclost:
-		netdev_info(priv->netdev, "sync flag is no longer set\n");
-		break;
-	case tc6error_spierror:
-		netdev_info(priv->netdev, "spi transaction failed\n");
-		break;
-	case tc6error_controltxfail:
-		netdev_info(priv->netdev, "control tx failure\n");
-		break;
-	default:
-		netdev_info(priv->netdev, "unknown tc6 error occurred=%d\n", err);
-		break;
-	}
-}
-
-static void lan865x_spi_transfer_complete(void *context)
-{
-	struct lan865x_priv *priv = context;
-
-	priv->spibusy = false;
-	mutex_lock(&priv->lock);
-	tc6_spibufferdone(&priv->tc6, true);
-	mutex_unlock(&priv->lock);
-	if (priv->int_pending) {
-		priv->int_pending = false;
-		priv->irq_flag = true;
-		wake_up_interruptible(&priv->irq_wq);
-	}
-}
-
-bool tc6_cb_onspitransaction(struct tc6_t *pinst, u8 *ptx, u8 *prx, u16 len,
-			     void *pglobaltag)
-{
-	struct lan865x_priv *priv = container_of(pinst, struct lan865x_priv, tc6);
-	int status = 0;
-
-	if (priv->spibusy)
-		return false;
-
-	priv->spibusy = true;
-	spi_message_init(&priv->msg);
-
-	priv->transfer.tx_nbits = 1; /* 1 mosi line */
-	priv->transfer.rx_nbits = 1; /* 1 miso line */
-	priv->transfer.speed_hz = 0; /* use device setting */
-	priv->transfer.bits_per_word = 0; /* use device setting */
-	priv->transfer.tx_buf = ptx;
-	priv->transfer.rx_buf = prx;
-	priv->transfer.delay.value = 0;
-	priv->transfer.delay.unit = SPI_DELAY_UNIT_USECS;
-	priv->transfer.cs_change = 0;
-	priv->transfer.len = len;
-	priv->msg.complete = lan865x_spi_transfer_complete;
-	priv->msg.context = priv;
-
-	spi_message_add_tail(&priv->transfer, &priv->msg);
-	status = spi_async(priv->spi, &priv->msg);
-	if (status < 0) {
-		pr_err_ratelimited("lan865x:spy_async failed, status: %d", status);
-		return false;
-	}
-	return true;
-}
-
-static void onclearstatus0(struct tc6_t *pinst, bool success, u32 addr, u32 value,
-			   void *tag, void *pglobaltag)
-{
-	tc6_unlockextendedstatus(pinst);
-}
-
-void onstatus0(struct tc6_t *pinst, bool success, u32 addr, u32 value, void *ptag,
-	       void *pglobaltag)
-{
-	struct lan865x_priv *priv = container_of(pinst, struct lan865x_priv, tc6);
-
-	if (printk_ratelimit())
-		netdev_info(priv->netdev, "EXT STS0: %x\n", value);
-
-	if (success)
-		tc6_writeregister(pinst, addr, value, onclearstatus0, NULL);
-	else
-		tc6_unlockextendedstatus(pinst);
-}
-
-void tc6_cb_onextendedstatus(struct tc6_t *pinst, void *pglobaltag)
-{
-	struct lan865x_priv *priv = container_of(pinst, struct lan865x_priv, tc6);
-
-	tc6_readregister(pinst, REG_STDR_STATUS0, onstatus0, priv);
-}
-
-static bool readefusereg(struct lan865x_priv *priv, u32 addr, u32 *pval)
-{
-	u32 val = 0x0;
-	bool success = true;
-
-	success = tc6_write_register(priv, 0x000400d8, addr & 0x000f);
-	if (success)
-		success = tc6_write_register(priv, 0x000400da, 0x0002);
-	mdelay(1);
-	if (success)
-		success = tc6_read_register(priv, 0x000400d9, &val);
-	if (success)
-		*pval = val;
-	return success;
-}
-
-static bool writeregisterbits(struct lan865x_priv *priv, u32 addr, u8 start,
-			      u8 end, u32 value)
-{
-	long wait_remaining;
-	u32 mask = 0;
-	u8 i;
-	bool ret;
-
-	for (i = start; i <= end; i++)
-		mask |= (1 << i);
-
-	reinit_completion(&priv->tc6_completion);
-	ret = tc6_readmodifywriteregister(&priv->tc6, addr, (value << start),
-					  mask, tc6_write_callback, priv);
-	if (ret) {
-		priv->ns_flag = true;
-		wake_up_interruptible(&priv->ns_wq);
-		wait_remaining = wait_for_completion_interruptible_timeout(&priv->tc6_completion,
-									   msecs_to_jiffies(100));
-		if ((wait_remaining == 0) || (wait_remaining == -ERESTARTSYS))
-			ret = false;
-		else
-			ret = true;
-	}
-	if (!ret) {
-		if (printk_ratelimit())
-			dev_err(&priv->spi->dev, "spi write register failed for addr: %x", addr);
-	}
-	return ret;
-}
-
-static bool lan865x_setup_efuse(struct lan865x_priv *priv)
-{
-	s8 efuse_a4_offset = 0;
-	s8 efuse_a8_offset = 0;
-	bool success = true;
-	u32 val = 0x0;
-
-	if (success) {
-		success = readefusereg(priv, 0x4, &val);
-		if (success) {
-			if ((val & (1 << 4)) == (1 << 4)) {
-				/* negative value */
-				efuse_a4_offset = val | 0xe0;
-				if (efuse_a4_offset < -5)
-					efuse_a4_offset = -5;
-			} else {
-				/* positive value */
-				efuse_a4_offset = val;
-			}
-		}
-	}
-	if (success) {
-		success = readefusereg(priv, 0x8, &val);
-		if (success) {
-			if ((val & (1 << 4)) == (1 << 4)) {
-				/* negative value */
-				efuse_a8_offset = val | 0xe0;
-				if (efuse_a8_offset < -5)
-					efuse_a8_offset = -5;
-			} else {
-				/* positive value */
-				efuse_a8_offset = val;
-			}
-		}
-	}
-	if (success)
-		success = writeregisterbits(priv, 0x00040084, 10, 15,
-					    0x9 + efuse_a4_offset);
-	if (success)
-		success = writeregisterbits(priv, 0x00040084, 4, 9,
-					    0xe + efuse_a4_offset);
-	if (success)
-		success = writeregisterbits(priv, 0x0004008a, 10, 15,
-					    0x28 + efuse_a8_offset);
-	if (success)
-		success = writeregisterbits(priv, 0x000400ad, 8, 13,
-					    0x5 + efuse_a4_offset);
-	if (success)
-		success = writeregisterbits(priv, 0x000400ad, 0, 5,
-					    0x9 + efuse_a4_offset);
-	if (success)
-		success = writeregisterbits(priv, 0x000400ae, 8, 13,
-					    0x9 + efuse_a4_offset);
-	if (success)
-		success = writeregisterbits(priv, 0x000400ae, 0, 5,
-					    0xe + efuse_a4_offset);
-	if (success)
-		success = writeregisterbits(priv, 0x000400af, 8, 13,
-					    0x11 + efuse_a4_offset);
-	if (success)
-		success = writeregisterbits(priv, 0x000400af, 0, 5,
-					    0x16 + efuse_a4_offset);
-
-	return success;
-}
-
-static bool lan865x_init(struct lan865x_priv *priv)
-{
+	struct lan865x_priv *priv = bus->priv;
 	u32 regval;
-	bool success = true;
+	bool ret;
 
-	tc6_init(&priv->tc6);
-	if (success) {
-		u32 i = 0;
+	ret = oa_tc6_read_register(priv->tc6, 0xFF00 | (idx & 0xFF), &regval, 1);
+	if (ret)
+		return -ENODEV;
 
-		while (i < tc6_memmap_length) {
-			i += tc6_multipleregisteraccess(&priv->tc6,
-							&tc6_memmap[i],
-							(tc6_memmap_length - i),
-							tc6_memmap_callback, NULL);
-			if (i != tc6_memmap_length)
-				mdelay(1); /* avoid high cpu load */
-		}
-	}
-	if (success) {
-		u32 val = 0x0;
-		bool success = readefusereg(priv, 0x5, &val);
-		bool istrimmed = success && (0 != (val & 0x40));
+	return regval;
+}
 
-		if (istrimmed) {
-			dev_info(&priv->spi->dev, "phy is trimmed\r\n");
-			success = lan865x_setup_efuse(priv);
-		} else if (success) {
-			dev_info(&priv->spi->dev, "phy is not trimmed!!\r\n");
-		}
+static int lan865x_mdiobus_write(struct mii_bus *bus, int phy_id, int idx,
+				 u16 regval)
+{
+	struct lan865x_priv *priv = bus->priv;
+	u32 value = regval;
+	bool ret;
+
+	ret = oa_tc6_write_register(priv->tc6, 0xFF00 | (idx & 0xFF), &value, 1);
+	if (ret)
+		return -ENODEV;
+
+	return 0;
+}
+
+static int lan86xx_configure_plca(struct phy_device *phydev)
+{
+	struct lan865x_priv *priv = netdev_priv(phydev->attached_dev);
+	int ret;
+
+	ret = phy_write_mmd(phydev, MDIO_MMD_VEND2, 0xCA02, priv->plca_node_count << 8 | priv->plca_node_id);
+	if (ret < 0)
+		return ret;
+	ret = phy_write_mmd(phydev, MDIO_MMD_VEND2, 0xCA05, priv->plca_burst_count << 8 | priv->plca_burst_timer);
+	if (ret < 0)
+		return ret;
+	ret = phy_write_mmd(phydev, MDIO_MMD_VEND2, 0xCA04, priv->plca_to_timer);
+	if (ret < 0)
+		return ret;
+	if (priv->plca_enable) {
+		ret = phy_write_mmd(phydev, MDIO_MMD_VEND2, 0xCA01, 0x8000);
+		if (ret < 0)
+			return ret;
+	} else {
+		ret = phy_write_mmd(phydev, MDIO_MMD_VEND2, 0xCA01, 0x0000);
+		if (ret < 0)
+			return ret;
 	}
-	if (success) {
-		if (priv->tx_cut_thr_mode) {
-			success = tc6_write_register(priv, REG_STDR_CONFIG0,
-						     TX_CUT_THROUGH_MODE);
-			if (success)
-				dev_info(&priv->spi->dev, "Tx cut through mode enabled\n");
-		}
-		else {
-			success = tc6_write_register(priv, REG_STDR_CONFIG0,
-						     TX_STORE_FWD_MODE);
-			if (success)
-				dev_info(&priv->spi->dev, "Store and forward mode enabled\n");
-		}
-	}
-	if (success) {
-		/* unmasking receive buffer overflow int*/
-		success = tc6_write_register(priv, 0x0000000c, (1 << 3));
-	}
-	if (success) {
-		if (priv->plca_enable) {
-			dev_info(&priv->spi->dev, "plca nodeid=%d\n",
-				 priv->plca_node_id);
-			dev_info(&priv->spi->dev, "plca maxid=%d\n",
-				 priv->plca_node_count);
-			dev_info(&priv->spi->dev, "plca to-timer=%d\n",
-				 priv->plca_to_timer);
-			dev_info(&priv->spi->dev, "plca burst-cnt=%d\n",
-				 priv->plca_burst_count);
-			dev_info(&priv->spi->dev, "plca burst-timer=%d\n",
-				 priv->plca_burst_timer);
-			/* setting max id and local node id */
-			regval = (priv->plca_node_count << 8) |
-				 priv->plca_node_id;
-			if (success)
-				success = tc6_write_register(priv,
-							     REG_PHY_PLCA_CTRL1,
-							     regval);
-			/* setting burst values */
-			regval = (priv->plca_burst_count << 8) |
-				 priv->plca_burst_timer;
-			if (success)
-				success = tc6_write_register(priv,
-							     REG_PHY_PLCA_BURST,
-							     regval);
-			/* setting to-timer */
-			if (success)
-				success = tc6_write_register(priv,
-							     REG_PHY_PLCA_TOTIME,
-							     priv->plca_to_timer);
-			/* enable plca */
-			if (success)
-				success = tc6_write_register(priv,
-							     REG_PHY_PLCA_CTRL0,
-							     PLCA_ENABLE);
-		}
-	}
-	if (success) {
-		success = tc6_read_register(priv, REG_STDR_STATUS0, &regval);
-		if (success) {
-			if (regval == 0x0 || regval == 0xffffffff)
-				success = false;
-		}
+	if (priv->plca_enable) {
+		ret = phy_write_mmd(phydev, MDIO_MMD_VEND2, LAN86XX_REG_COL_DET_CTRL0, LAN86XX_DISABLE_COL_DET);
+		if (ret < 0)
+			return ret;
+		phydev_info(phydev, "PLCA mode enabled. Node Id: %d, Node Count: %d, Max BC: %d, Burst Timer: %d, TO Timer: %d\n",
+			    priv->plca_node_id, priv->plca_node_count, priv->plca_burst_count, priv->plca_burst_timer, priv->plca_to_timer);
+	} else {
+		ret = phy_write_mmd(phydev, MDIO_MMD_VEND2, LAN86XX_REG_COL_DET_CTRL0, LAN86XX_ENABLE_COL_DET);
+		if (ret < 0)
+			return ret;
+		phydev_info(phydev, "CSMA/CD mode enabled\n");
 	}
 
-	return success;
+	return 0;
+}
+
+static int lan865x_phy_fixup(struct phy_device *phydev)
+{
+	struct lan865x_priv *priv = netdev_priv(phydev->attached_dev);
+	u32 regval;
+	int ret;
+
+	ret = oa_tc6_read_register(priv->tc6, REG_CCS_DEVID, &regval, 1);
+	if (ret)
+		return ret;
+
+	if (FIELD_GET(LAN865X_REV_ID, regval) == LAN865X_REV_B0)
+		netdev_info(priv->netdev, "LAN865X Rev.B0\n");
+	if (FIELD_GET(LAN865X_REV_ID, regval) == LAN865X_REV_B1) {
+		netdev_info(priv->netdev, "LAN865X Rev.B1\n");
+		ret = phy_write_mmd(phydev, MDIO_MMD_VEND2, 0x00D0, 0x3F31);
+		if (ret)
+			return ret;
+		ret = phy_write_mmd(phydev, MDIO_MMD_VEND2, 0x00E0, 0xC000);
+		if (ret)
+			return ret;
+	}
+
+	return lan86xx_configure_plca(phydev);
+}
+
+static int lan865x_phy_init(struct lan865x_priv *priv)
+{
+	int ret;
+
+	priv->mdiobus = mdiobus_alloc();
+	if (!priv->mdiobus) {
+		netdev_err(priv->netdev, "MDIO bus alloc failed\n");
+		return -ENODEV;
+	}
+
+	priv->mdiobus->phy_mask = ~(u32)BIT(1);
+	priv->mdiobus->priv = priv;
+	priv->mdiobus->read = lan865x_mdiobus_read;
+	priv->mdiobus->write = lan865x_mdiobus_write;
+	priv->mdiobus->name = "lan865x-mdiobus";
+	priv->mdiobus->parent = priv->dev;
+
+	snprintf(priv->mdiobus->id, ARRAY_SIZE(priv->mdiobus->id),
+		 "%s", dev_name(&priv->spi->dev));
+
+	ret = mdiobus_register(priv->mdiobus);
+	if (ret) {
+		netdev_err(priv->netdev, "Could not register MDIO bus\n");
+		mdiobus_free(priv->mdiobus);
+		return ret;
+	}
+	priv->phydev = phy_find_first(priv->mdiobus);
+	if (!priv->phydev) {
+		netdev_err(priv->netdev, "No PHY found\n");
+		mdiobus_unregister(priv->mdiobus);
+		mdiobus_free(priv->mdiobus);
+		return -ENODEV;
+	}
+	priv->phydev->is_internal = true;
+	ret = phy_connect_direct(priv->netdev, priv->phydev,
+				 &lan865x_handle_link_change,
+				 PHY_INTERFACE_MODE_INTERNAL);
+	if (ret) {
+		netdev_err(priv->netdev, "Can't attach PHY to %s\n", priv->mdiobus->id);
+		return ret;
+	}
+	phy_attached_info(priv->phydev);
+	return ret;
 }
 
 static int lan865x_set_hw_macaddr(struct net_device *netdev)
@@ -692,109 +232,38 @@ static int lan865x_set_hw_macaddr(struct net_device *netdev)
 	u32 regval;
 	bool ret;
 	struct lan865x_priv *priv = netdev_priv(netdev);
-	struct device *dev = &priv->spi->dev;
-	u8 *mac = netdev->dev_addr;
+	const u8 *mac = netdev->dev_addr;
 
-	if (!priv->enable_data) {
+	ret = oa_tc6_read_register(priv->tc6, REG_MAC_NW_CTRL, &regval, 1);
+	if (ret)
+		goto error_mac;
+	if ((regval & NW_TX_STATUS) | (regval & NW_RX_STATUS)) {
 		if (netif_msg_drv(priv))
-			dev_info(dev, "%s: setting mac address to %pm",
-				 netdev->name, netdev->dev_addr);
-		/* mac address setting */
-		regval = (mac[3] << 24) | (mac[2] << 16) | (mac[1] << 8) | mac[0];
-		ret = tc6_write_register(priv, REG_MAC_ADDR_L, regval);
-		if (ret) {
-			regval = (mac[5] << 8) | mac[4];
-			ret = tc6_write_register(priv, REG_MAC_ADDR_H, regval);
-		}
-		if (ret) {
-			/* MAC address setting, setting unique lower MAC address, back off time is generated out of that */
-			regval = (mac[5] << 24) | (mac[4] << 16) | (mac[3] << 8) | mac[2];
-			ret = tc6_write_register(priv, REG_MAC_ADDR_BO, regval);
-		}
-		if (!ret) {
-			dev_dbg(dev,
-				"%s() failed to set mac address",
-				   __func__);
-			return -EIO;
-		}
-	} else {
-		if (netif_msg_drv(priv))
-			dev_dbg(dev,
-				"%s() hardware must be disabled to set mac address",
-				   __func__);
+			netdev_warn(netdev, "Hardware must be disabled for MAC setting\n");
 		return -EBUSY;
 	}
-	return 0;
-}
+	/* MAC address setting */
+	regval = (mac[3] << 24) | (mac[2] << 16) | (mac[1] << 8) |
+		mac[0];
+	ret = oa_tc6_write_register(priv->tc6, REG_MAC_ADDR_L, &regval, 1);
+	if (ret)
+		goto error_mac;
 
-static int ns_handler(void *data)
-{
-	struct lan865x_priv *priv = data;
+	regval = (mac[5] << 8) | mac[4];
+	ret = oa_tc6_write_register(priv->tc6, REG_MAC_ADDR_H, &regval, 1);
+	if (ret)
+		goto error_mac;
 
-	while (likely(!kthread_should_stop())) {
-		wait_event_interruptible(priv->ns_wq,  priv->ns_flag ||
-							kthread_should_stop());
-		priv->ns_flag = false;
-		mutex_lock(&priv->lock);
-		tc6_service(&priv->tc6, true);
-		mutex_unlock(&priv->lock);
-	}
-	return 0;
-}
-
-static int irq_handler(void *data)
-{
-	struct lan865x_priv *priv = data;
-
-	while (likely(!kthread_should_stop())) {
-		wait_event_interruptible(priv->irq_wq,  priv->irq_flag ||
-							kthread_should_stop());
-		priv->irq_flag = false;
-		mutex_lock(&priv->lock);
-		if (!tc6_service(&priv->tc6, false))
-			priv->int_pending = true;
-		mutex_unlock(&priv->lock);
-	}
-	return 0;
-}
-
-static irqreturn_t lan865x_irq(int irq, void *dev_id)
-{
-	struct lan865x_priv *priv = dev_id;
-
-	if (priv->enable_data) {
-		priv->irq_flag = true;
-		wake_up_interruptible(&priv->irq_wq);
-	}
-	return IRQ_HANDLED;
-}
-
-void tc6_cb_onneedservice(struct tc6_t *pinst, void *pglobaltag)
-{
-	struct lan865x_priv *priv = container_of(pinst, struct lan865x_priv, tc6);
-
-	priv->ns_flag = true;
-	wake_up_interruptible(&priv->ns_wq);
-}
-
-static int lan865x_hw_enable(struct lan865x_priv *priv)
-{
-	if (!tc6_write_register(priv, REG_MAC_NW_CTRL, 0xc))
-		return -EIO;
-	tc6_enabledata(&priv->tc6, true);
-	priv->enable_data = true;
+	regval = (mac[5] << 24) | (mac[4] << 16) |
+		(mac[3] << 8) | mac[2];
+	ret = oa_tc6_write_register(priv->tc6, REG_MAC_ADDR_BO, &regval, 1);
+	if (ret)
+		goto error_mac;
 
 	return 0;
-}
 
-static int lan865x_hw_disable(struct lan865x_priv *priv)
-{
-	tc6_enabledata(&priv->tc6, false);
-	priv->enable_data = false;
-	if (!tc6_write_register(priv, REG_MAC_NW_CTRL, 0x0))
-		return -EIO;
-
-	return 0;
+error_mac:
+	return -ENODEV;
 }
 
 static int
@@ -804,17 +273,14 @@ lan865x_set_link_ksettings(struct net_device *netdev,
 	struct lan865x_priv *priv = netdev_priv(netdev);
 	int ret = 0;
 
-	if (!priv->enable_data) {
-		if ((cmd->base.autoneg != AUTONEG_DISABLE) ||
-		    (cmd->base.speed != SPEED_10) ||
-		    (cmd->base.duplex != DUPLEX_HALF)) {
-			if (netif_msg_link(priv))
-				netdev_warn(netdev, "unsupported link setting");
-			ret = -EOPNOTSUPP;
-		}
+	if (cmd->base.autoneg != AUTONEG_DISABLE ||
+	    cmd->base.speed != SPEED_10 || cmd->base.duplex != DUPLEX_HALF) {
+		if (netif_msg_link(priv))
+			netdev_warn(netdev, "Unsupported link setting");
+		ret = -EOPNOTSUPP;
 	} else {
 		if (netif_msg_link(priv))
-			netdev_warn(netdev, "warning: hw must be disabled to set link mode");
+			netdev_warn(netdev, "Hardware must be disabled to set link mode");
 		ret = -EBUSY;
 	}
 	return ret;
@@ -867,6 +333,11 @@ static const struct ethtool_ops lan865x_ethtool_ops = {
 	.set_link_ksettings = lan865x_set_link_ksettings,
 };
 
+static void lan865x_tx_timeout(struct net_device *netdev, unsigned int txqueue)
+{
+	netdev->stats.tx_errors++;
+}
+
 static int lan865x_set_mac_address(struct net_device *netdev, void *addr)
 {
 	struct sockaddr *address = addr;
@@ -876,14 +347,10 @@ static int lan865x_set_mac_address(struct net_device *netdev, void *addr)
 	if (!is_valid_ether_addr(address->sa_data))
 		return -EADDRNOTAVAIL;
 
-	ether_addr_copy(netdev->dev_addr, address->sa_data);
+	eth_hw_addr_set(netdev, address->sa_data);
 	return lan865x_set_hw_macaddr(netdev);
 }
 
-/* returns hash bit number for given mac address
- * example:
- * 01 00 5e 00 00 01 -> returns bit number 31
- */
 static u32 lan865x_hash(u8 addr[ETH_ALEN])
 {
 	return (ether_crc(ETH_ALEN, addr) >> 26) & 0x3f;
@@ -895,17 +362,17 @@ static void lan865x_set_multicast_list(struct net_device *netdev)
 	u32 regval = 0;
 
 	if (netdev->flags & IFF_PROMISC) {
-		/* enabling promiscuous mode */
+		/* Enabling promiscuous mode */
 		regval |= MAC_PROMISCUOUS_MODE;
 		regval &= (~MAC_MULTICAST_MODE);
 		regval &= (~MAC_UNICAST_MODE);
 	} else if (netdev->flags & IFF_ALLMULTI) {
-		/* enabling all multicast mode */
+		/* Enabling all multicast mode */
 		regval &= (~MAC_PROMISCUOUS_MODE);
 		regval |= MAC_MULTICAST_MODE;
 		regval &= (~MAC_UNICAST_MODE);
 	} else if (!netdev_mc_empty(netdev)) {
-		/* enabling specific multicast addresses */
+		/* Enabling specific multicast addresses */
 		struct netdev_hw_addr *ha;
 		u32 hash_lo = 0;
 		u32 hash_hi = 0;
@@ -919,73 +386,83 @@ static void lan865x_set_multicast_list(struct net_device *netdev)
 			else
 				hash_lo |= mask;
 		}
-		if (!tc6_writeregister(&priv->tc6, REG_MAC_HASHH, hash_hi, NULL, NULL)) {
+		if (oa_tc6_write_register(priv->tc6, REG_MAC_HASHH, &hash_hi, 1)) {
 			if (netif_msg_timer(priv))
-				netdev_err(netdev, "failed to write reg_hashh");
+				netdev_err(netdev, "Failed to write reg_hashh");
+			return;
 		}
-		if (!tc6_writeregister(&priv->tc6, REG_MAC_HASHL, hash_lo, NULL, NULL)) {
+		if (oa_tc6_write_register(priv->tc6, REG_MAC_HASHL, &hash_lo, 1)) {
 			if (netif_msg_timer(priv))
-				netdev_err(netdev, "failed to write reg_hashl");
+				netdev_err(netdev, "Failed to write reg_hashl");
+			return;
 		}
 		regval &= (~MAC_PROMISCUOUS_MODE);
 		regval &= (~MAC_MULTICAST_MODE);
 		regval |= MAC_UNICAST_MODE;
 	} else {
+		regval = 0;
 		/* enabling local mac address only */
-		if (!tc6_writeregister(&priv->tc6, REG_MAC_HASHH, 0, NULL, NULL)) {
+		if (oa_tc6_write_register(priv->tc6, REG_MAC_HASHH, &regval, 1)) {
 			if (netif_msg_timer(priv))
-				netdev_err(netdev, "failed to write reg_hashh");
+				netdev_err(netdev, "Failed to write reg_hashh");
+			return;
 		}
-		if (!tc6_writeregister(&priv->tc6, REG_MAC_HASHL, 0, NULL, NULL)) {
+		if (oa_tc6_write_register(priv->tc6, REG_MAC_HASHL, &regval, 1)) {
 			if (netif_msg_timer(priv))
-				netdev_err(netdev, "failed to write reg_hashl");
+				netdev_err(netdev, "Failed to write reg_hashl");
+			return;
 		}
 		regval &= (~MAC_PROMISCUOUS_MODE);
 		regval &= (~MAC_MULTICAST_MODE);
 		regval &= (~MAC_UNICAST_MODE);
 	}
-	if (!tc6_writeregister(&priv->tc6, REG_MAC_NW_CONFIG, regval, NULL, NULL)) {
+	if (oa_tc6_write_register(priv->tc6, REG_MAC_NW_CONFIG, &regval, 1)) {
 		if (netif_msg_timer(priv))
-			netdev_err(netdev, "failed to enable promiscuous mode");
+			netdev_err(netdev, "Failed to enable promiscuous mode");
 	}
-}
-
-void onrawtx(struct tc6_t *pinst, const u8 *ptx, u16 len, void *ptag, void *pglobaltag)
-{
-	struct lan865x_priv *priv = container_of(pinst, struct lan865x_priv, tc6);
-	struct sk_buff *tx_skb = ptag;
-
-	priv->netdev->stats.tx_packets++;
-	priv->netdev->stats.tx_bytes += len;
-	dev_kfree_skb(tx_skb);
-	if (netif_queue_stopped(priv->netdev))
-		netif_wake_queue(priv->netdev);
 }
 
 static netdev_tx_t lan865x_send_packet(struct sk_buff *skb,
 				       struct net_device *netdev)
 {
 	struct lan865x_priv *priv = netdev_priv(netdev);
-	bool ret;
 
-	ret = tc6_sendrawethernetpacket(&priv->tc6, skb->data, skb->len, 0, onrawtx, skb);
-	if (!ret) {
-		netif_stop_queue(priv->netdev);
-		return NETDEV_TX_BUSY;
-	}
-	return NETDEV_TX_OK;
+	return oa_tc6_send_eth_pkt(priv->tc6, skb);
+}
+
+static int lan865x_hw_disable(struct lan865x_priv *priv)
+{
+	u32 regval = NW_DISABLE;
+
+	if (oa_tc6_write_register(priv->tc6, REG_MAC_NW_CTRL, &regval, 1))
+		return -ENODEV;
+
+	return 0;
 }
 
 static int lan865x_net_close(struct net_device *netdev)
 {
 	struct lan865x_priv *priv = netdev_priv(netdev);
+	int ret;
 
-	if (lan865x_hw_disable(priv) != 0) {
+	ret = lan865x_hw_disable(priv);
+	if (ret) {
 		if (netif_msg_ifup(priv))
-			netdev_err(netdev, "lan865x_hw_disable() failed");
-		return -EIO;
+			netdev_err(netdev, "Failed to disable the hardware\n");
+		return ret;
 	}
+
 	netif_stop_queue(netdev);
+
+	return 0;
+}
+
+static int lan865x_hw_enable(struct lan865x_priv *priv)
+{
+	u32 regval = NW_TX_STATUS | NW_RX_STATUS;
+
+	if (oa_tc6_write_register(priv->tc6, REG_MAC_NW_CTRL, &regval, 1))
+		return -ENODEV;
 
 	return 0;
 }
@@ -997,36 +474,26 @@ static int lan865x_net_open(struct net_device *netdev)
 
 	if (!is_valid_ether_addr(netdev->dev_addr)) {
 		if (netif_msg_ifup(priv))
-			netdev_err(netdev, "invalid mac address %pm", netdev->dev_addr);
+			netdev_err(netdev, "Invalid MAC address %pm", netdev->dev_addr);
 		return -EADDRNOTAVAIL;
 	}
-	if (lan865x_hw_disable(priv) != 0) {
+	if (lan865x_hw_disable(priv)) {
 		if (netif_msg_ifup(priv))
-			netdev_err(netdev, "lan865x_hw_disable() failed");
-		return -EIO;
+			netdev_err(netdev, "Failed to disable the hardware\n");
+		return -ENODEV;
 	}
 	ret = lan865x_set_hw_macaddr(netdev);
 	if (ret != 0)
 		return ret;
+
 	if (lan865x_hw_enable(priv) != 0) {
 		if (netif_msg_ifup(priv))
-			netdev_err(netdev, "lan865x_hw_enable() failed");
-		return -EIO;
+			netdev_err(netdev, "Failed to enable hardware\n");
+		return -ENODEV;
 	}
 	netif_start_queue(netdev);
 
 	return 0;
-}
-
-static void lan865x_tx_timeout(struct net_device *netdev, unsigned int txqueue)
-{
-	struct lan865x_priv *priv = netdev_priv(netdev);
-
-	if (netif_msg_timer(priv)) {
-		if (printk_ratelimit())
-			netdev_err(netdev, "tx timeout");
-	}
-	netdev->stats.tx_errors++;
 }
 
 static const struct net_device_ops lan865x_netdev_ops = {
@@ -1039,14 +506,10 @@ static const struct net_device_ops lan865x_netdev_ops = {
 	.ndo_validate_addr	= eth_validate_addr,
 };
 
-#ifdef CONFIG_OF
 static int lan865x_get_dt_data(struct lan865x_priv *priv)
 {
 	struct spi_device *spi = priv->spi;
 	int ret;
-
-	if (!spi->dev.of_node)
-		return -EINVAL;
 
 	ret = of_property_read_u8(spi->dev.of_node, "plca-enable", &priv->plca_enable);
 	if (ret < 0) {
@@ -1069,8 +532,8 @@ static int lan865x_get_dt_data(struct lan865x_priv *priv)
 		}
 		if (priv->plca_node_id == 0) {
 			ret = of_property_read_u8(spi->dev.of_node,
-						  "plca-node-count",
-						  &priv->plca_node_count);
+					"plca-node-count",
+					&priv->plca_node_count);
 			if (ret < 0) {
 				dev_err(&spi->dev, "plca-node-count property is not found in device tree");
 				return ret;
@@ -1114,114 +577,91 @@ static int lan865x_get_dt_data(struct lan865x_priv *priv)
 		dev_err(&spi->dev, "bad value in rx-cut-through-mode property");
 		return -EINVAL;
 	}
-	return 0;
-}
-#else
-static int lan865x_get_dt_data(struct lan865x_priv *priv)
-{
-	return -EINVAL;
-}
-#endif
-
-#ifdef CONFIG_ACPI
-static int lan865x_get_acpi_data(struct lan865x_priv *priv)
-{
-	priv->plca_enable = 1;
-	priv->plca_node_id = 0;
-	priv->plca_node_count = 8;
-	priv->plca_burst_count = PLCA_BURST_CNT_VAL;
-	priv->plca_burst_timer = PLCA_BURST_TMR_VAL;
-	priv->plca_to_timer = PLCA_TO_TIMER_VAL;
-	priv->tx_cut_thr_mode = 1;
-	priv->rx_cut_thr_mode = 1;
+	ret = of_property_read_u8(spi->dev.of_node, "oa-chunk-size", &priv->cps);
+	if (ret < 0) {
+		dev_err(&spi->dev, "oa-chunk-size property is not found in device tree");
+		return ret;
+	}
+	if (!((priv->cps == 64) || (priv->cps == 32))) {
+		dev_err(&spi->dev, "bad value in oa-chunk-size property");
+		return -EINVAL;
+	}
+	ret = of_property_read_u8(spi->dev.of_node, "oa-protected", &priv->protected);
+	if (ret < 0) {
+		dev_err(&spi->dev, "oa-protected property is not found in device tree");
+		return ret;
+	}
+	if (priv->protected > 1) {
+		dev_err(&spi->dev, "bad value in oa-protected property");
+		return -EINVAL;
+	}
 
 	return 0;
 }
-#else
-static int lan865x_get_acpi_data(struct lan865x_priv *priv)
-{
-	return -EINVAL;
-}
-#endif
 
 static int lan865x_probe(struct spi_device *spi)
 {
-	struct lan865x_priv *priv;
 	struct net_device *netdev;
-	unsigned char macaddr[ETH_ALEN];
+	struct lan865x_priv *priv;
+	u32 regval;
 	int ret;
 
 	netdev = alloc_etherdev(sizeof(struct lan865x_priv));
-	if (!netdev) {
-		ret = -ENOMEM;
-		goto error_alloc;
-	}
+	if (!netdev)
+		return -ENOMEM;
+
 	priv = netdev_priv(netdev);
-	priv->netdev = netdev;	/* priv to netdev reference */
-	priv->spi = spi;	/* priv to spi reference */
-	priv->msg_enable = netif_msg_init(debug.msg_enable, LAN865X_MSG_DEFAULT);
-	mutex_init(&priv->lock);
-	spi_set_drvdata(spi, priv);	/* spi to priv reference */
+	priv->netdev = netdev;
+	priv->spi = spi;
+	priv->msg_enable = netif_msg_init(debug.msg_enable,
+					  LAN865X_MSG_DEFAULT);
+	spi_set_drvdata(spi, priv);
 	SET_NETDEV_DEV(netdev, &spi->dev);
 
-	init_completion(&priv->tc6_completion);
-	init_waitqueue_head(&priv->irq_wq);
-	init_waitqueue_head(&priv->ns_wq);
-
-#ifdef CONFIG_OF
 	ret = lan865x_get_dt_data(priv);
-#endif
-#ifdef CONFIG_ACPI
-	ret = lan865x_get_acpi_data(priv);
-#endif
-	if (ret) {
-		if (netif_msg_probe(priv))
-			dev_err(&spi->dev, "no platform data for lan865x");
-		ret = -ENODEV;
-		goto error_platform_data;
-	}
-
-	ret = devm_request_irq(&spi->dev, spi->irq, lan865x_irq, 0, "tc6 int", priv);
-        if ((ret != -ENOTCONN) && (ret < 0)) {
-                dev_err(&spi->dev, "error attaching irq %d\n", ret);
-                goto error_request_irq;
-        }
-
-	priv->irq_task = kthread_run(irq_handler, priv, "irq_task");
-	if (IS_ERR(priv->irq_task)) {
-		ret = PTR_ERR(priv->irq_task);
-		goto error_irq_task;
-	}
-	sched_set_fifo(priv->irq_task);
-
-	priv->ns_task = kthread_run(ns_handler, priv, "ns_task");
-	if (IS_ERR(priv->ns_task)) {
-		ret = PTR_ERR(priv->ns_task);
-		goto error_ns_task;
-	}
-	sched_set_fifo(priv->ns_task);
+	if (ret)
+		return ret;
 
 	spi->rt = true;
 	spi_setup(spi);
 
-	ret = lan865x_init(priv);
-	if (!ret) {
-		if (netif_msg_probe(priv))
-			dev_err(&spi->dev, "lan865x init failed, hardware not found");
-		ret = -ENODEV;
-		goto error_init;
+	priv->tc6 = oa_tc6_init(spi, netdev);
+	if (!priv->tc6) {
+		ret = -ENOMEM;
+		goto error_oa_tc6_init;
 	}
 
-	if (device_get_mac_address(&spi->dev, macaddr, sizeof(macaddr)))
-		ether_addr_copy(netdev->dev_addr, macaddr);
-	else
+	if (priv->cps == 32) {
+		regval = CCS_Q0_TX_CFG_32;
+		ret = oa_tc6_write_register(priv->tc6, CCS_Q0_TX_CFG, &regval, 1);
+		if (ret)
+			return ret;
+
+		regval = CCS_Q0_RX_CFG_32;
+		ret = oa_tc6_write_register(priv->tc6, CCS_Q0_RX_CFG, &regval, 1);
+		if (ret)
+			return ret;
+	}
+
+	if (oa_tc6_configure(priv->tc6, priv->cps, priv->protected, priv->tx_cut_thr_mode,
+			     priv->rx_cut_thr_mode))
+		goto err_macphy_config;
+
+	ret = lan865x_phy_init(priv);
+	if (ret)
+		goto error_phy;
+
+	ret = lan865x_phy_fixup(priv->phydev);
+	if (ret)
+		goto error_phy_fixup;
+
+	if (device_get_ethdev_address(&spi->dev, netdev))
 		eth_hw_addr_random(netdev);
 
 	ret = lan865x_set_hw_macaddr(netdev);
 	if (ret) {
 		if (netif_msg_probe(priv))
-			dev_err(&spi->dev, "lan865x mac addr config failed");
-		ret = -EIO;
+			dev_err(&spi->dev, "Failed to configure MAC");
 		goto error_set_mac;
 	}
 
@@ -1233,52 +673,45 @@ static int lan865x_probe(struct spi_device *spi)
 	ret = register_netdev(netdev);
 	if (ret) {
 		if (netif_msg_probe(priv))
-			dev_err(&spi->dev, "register netdev failed (ret = %d)",
+			dev_err(&spi->dev, "Register netdev failed (ret = %d)",
 				ret);
 		goto error_netdev_register;
 	}
 
-	if (priv->plca_enable)
-		netdev_info(netdev, "plca mode is active");
-	else
-		netdev_info(netdev, "csma/cd mode is active");
-
+	phy_start(priv->phydev);
 	return 0;
 
 error_netdev_register:
+error_phy_fixup:
 error_set_mac:
-	devm_free_irq(&spi->dev, spi->irq, priv);
-error_init:
-error_request_irq:
-	kthread_stop(priv->ns_task);
-error_ns_task:
-	kthread_stop(priv->irq_task);
-error_irq_task:
-	del_timer(&priv->tc6_timer);
-error_platform_data:
-	free_netdev(netdev);
-error_alloc:
+	phy_disconnect(priv->phydev);
+	mdiobus_unregister(priv->mdiobus);
+	mdiobus_free(priv->mdiobus);
+error_phy:
+err_macphy_config:
+	oa_tc6_deinit(priv->tc6);
+error_oa_tc6_init:
+	free_netdev(priv->netdev);
 	return ret;
 }
 
-static int lan865x_remove(struct spi_device *spi)
+static void lan865x_remove(struct spi_device *spi)
 {
 	struct lan865x_priv *priv = spi_get_drvdata(spi);
 
+	phy_stop(priv->phydev);
+	phy_disconnect(priv->phydev);
+	mdiobus_unregister(priv->mdiobus);
+	mdiobus_free(priv->mdiobus);
 	unregister_netdev(priv->netdev);
-	if (spi->irq > 0)
-		devm_free_irq(&spi->dev, spi->irq, priv);
-	kthread_stop(priv->irq_task);
-	kthread_stop(priv->ns_task);
+	oa_tc6_deinit(priv->tc6);
 	free_netdev(priv->netdev);
-
-	return 0;
 }
 
 #ifdef CONFIG_OF
 static const struct of_device_id lan865x_dt_ids[] = {
 	{ .compatible = "microchip,lan865x" },
-	{ /* sentinel */ }
+	{ /* Sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, lan865x_dt_ids);
 #endif

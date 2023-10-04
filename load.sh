@@ -2,14 +2,15 @@
 
 echo performance | sudo tee /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor > /dev/null
 
+sudo insmod microchip_t1s.ko
 sudo insmod lan865x_t1s.ko
 
 mac_addr_1=04:05:06:01:02:03
-ip_addr_1=192.168.1.100
+ip_addr_1=192.168.5.100
 subnet_mask_1=255.255.255.0
 
 mac_addr_2=14:15:16:11:12:13
-ip_addr_2=192.168.2.100
+ip_addr_2=192.168.6.100
 subnet_mask_2=255.255.255.0
 
 mac_addr=$(ip -o link | grep ether | awk '{ print $2" "$17 }' | tr '\n' ' ')

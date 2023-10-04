@@ -1,12 +1,12 @@
 # LAN865x 10BASE-T1S MAC-PHY Ethernet Linux Driver
 
-This document describes the procedure for configuring the LAN865x hardware and installing  driver. These procedures are tested in **Raspberry Pi 4 with Linux Kernel 5.15.84**.
+This document describes the procedure for configuring the LAN865x hardware and installing  driver. These procedures are tested in **Raspberry Pi 4 with Linux Kernel 6.1.21**.
 
 ## Setup the hardware
 - Connect the Pi 4 Click Shield board on the 40-pin header in Pi 4.
     - Pi 4 Click Shield buy link: https://www.mikroe.com/pi-4-click-shield
 - Connect the LAN865x on the Mikro Bus slots available on the Pi 4 Click Shield.
-    - LAN865x Click board buy link: [https://www.mikroe.com/two-wire-eth-click](url)
+    - LAN865x Click board buy link: https://www.mikroe.com/two-wire-eth-click
     - For more details please refer to the Microchip LAN865x product website:
         - [LAN8650](https://www.microchip.com/en-us/product/lan8650)
         - [LAN8651](https://www.microchip.com/en-us/product/lan8651)
@@ -23,7 +23,7 @@ If the Raspberry Pi OS is freshly installed, then the below prerequisites are ma
 ```
     $ sudo date -s "Wednesday 01 March 2023 02:38:43 PM IST"
 ```
-Link to refer: [https://raspberrytips.com/set-date-time-raspberry-pi/](url)
+Link to refer: https://raspberrytips.com/set-date-time-raspberry-pi/
 - Please make sure the **apt-get is up to date**. Run the below command to update apt-get,
 ```
     $ sudo apt-get update
@@ -32,8 +32,8 @@ Link to refer: [https://raspberrytips.com/set-date-time-raspberry-pi/](url)
 - Extract the downloaded software package into your local directory using the below command,
 
 ```
-    $ unzip lan865x-linux-driver-0v1.zip
-    $ cd lan865x-linux-driver-0v1/
+    $ unzip lan865x-linux-driver-0v2.zip
+    $ cd lan865x-linux-driver-0v2/
 ```
 ## Configure and install using script
 There are two scripts are available for the user interface. You can use either one of the script to configure LAN865x.
@@ -100,12 +100,16 @@ Run the below command if you wan to go with command line interface.
         - 1 - Tx cut through mode enable and store & forward mode disable, 0 - vice versa.
     - rx-cut-through-mode
         - 1 - Rx cut through mode enable and store & forward mode disable, 0 - vice versa.
+    - oa-chunk-size
+        - 32 or 64.
+    - oa-protected
+        - 1 - OA protected enable, 0 - OA protected disable.
 
 **Command to open the file**,
 ```
     $ vim dts/lan865x-overlay.dts
 ```
-**Note:** Enabling Tx cut through mode gives higher throughput, but will fail if SPI transfer rate is lower than network transfer rate.
+**Note:** Tx and Rx cut through mode will fail if SPI transfer rate is slower than the network transfer rate.
 - Make sure the device tree compiler **dtc** is installed in Pi, if not use the below command to install it,
 ```
     $ sudo apt-get install device-tree-compiler
@@ -177,7 +181,7 @@ Run the below command if you wan to go with command line interface.
     interface eth2
     static ip_address=192.168.20.21/24
 ```
-## Testing results with iperf3
+## Testing results with iperf3 in RPI 4
 - Command on server side and the IP is 192.168.10.12,
 ```
     $ iperf3 -s -i 1
@@ -196,18 +200,17 @@ Run the below command if you wan to go with command line interface.
 
 **Test case 3:** Two LAN865x's are connected and tx cut through mode enabled on both.
 
-**Result:** Not working as expected since the spi speed is not matching with network speed.
+**Result:** The total bandwidth configuration should not exceed 10Mbps to achieve the expected performance.
 
 **Test case 4:** Two LAN865x's are connected and tx cut through mode disabled on both.
 
-**Result:** Performance around **5.0Mbps** on both when both LAN865x's are configured as Tx.
+**Result:** Performance around **5.0Mbps** on both when both LAN865x's are configured as Tx. In case of Rx, the total bandwidth configuration should not exceed more than 10 Mbps to achieve the expected performance.
 
-**Note:** Test case 3 and 4 are tested with two networks and also note that the above hardware setup is using **single SPI master** and **two LAN865x SPI slaves**.
+**Note 1:** Test case 3 and 4 are tested with two networks and also note that the above hardware setup is using **single SPI master** and **two LAN865x SPI slaves**.
+
+**Note 2:** The above tests are performed in RPI 4. Different platforms with dedicated SPI master for each nodes will give better performance than this.
 ## TODO
 - Timestamping according to Open Alliance TC6 is to be implemented.
-- Configurable chunk size to be implemented. Currently it is hardcoded as 64bytes.
-## Known Issues
-- Enabling tx/rx cut through mode will improve the latency but the system may not be fast enough to serve SPI (Observed SPI transfer completion in SPI subsystem takes too long, sometimes more than 3ms in case if the system is busy with other tasks running parallelly) if it is busy with other tasks and leads to some packets loss. So it is recommended to disable tx/rx cut through mode (enables store and forward mode) in case the latency is not a concern.
 ## References
 - [OPEN Alliance TC6 - 10BASE-T1x MAC-PHY Serial Interface specification](https://www.opensig.org/Automotive-Ethernet-Specifications)
 - [OPEN Alliance TC6 Protocol Driver for LAN8650/1](https://github.com/MicrochipTech/oa-tc6-lib)
