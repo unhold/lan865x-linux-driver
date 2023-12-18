@@ -42,6 +42,7 @@ static void oa_tc6_prepare_ctrl_buf(struct oa_tc6 *tc6, u32 addr, u32 val[],
 				    u8 len, bool wnr, u8 *buf, bool ctrl_prot)
 {
 	u32 hdr;
+	u8 i;
 
 	/* Prepare the control header with the required details */
 	hdr = FIELD_PREP(CTRL_HDR_DNC, 0) |
@@ -54,7 +55,7 @@ static void oa_tc6_prepare_ctrl_buf(struct oa_tc6 *tc6, u32 addr, u32 val[],
 	*(u32 *)&buf[0] = cpu_to_be32(hdr);
 
 	if (wnr) {
-		for (u8 i = 0; i < len; i++) {
+		for (i = 0; i < len; i++) {
 			u16 pos;
 
 			if (!ctrl_prot) {
@@ -87,6 +88,7 @@ static int oa_tc6_check_control(struct oa_tc6 *tc6, u8 *ptx, u8 *prx, u8 len,
 	u32 tx_data;
 	u32 rx_data;
 	u16 pos;
+	u8 i;
 
 	/* If tx hdr and echoed hdr are not equal then there might be an issue
 	 * with the connection between SPI host and MAC-PHY. Here this case is
@@ -100,7 +102,7 @@ static int oa_tc6_check_control(struct oa_tc6 *tc6, u8 *ptx, u8 *prx, u8 len,
 			/* In case of ctrl write, both tx data & echoed
 			 * data are compared for the error.
 			 */
-			for (u8 i = 0; i < len; i++) {
+			for (i = 0; i < len; i++) {
 				pos = TC6_HDR_SIZE + (i * TC6_HDR_SIZE);
 				tx_data = *(u32 *)&ptx[pos];
 				pos = (TC6_HDR_SIZE * 2) + (i * TC6_HDR_SIZE);
@@ -123,7 +125,7 @@ check_rx_data:
 	/* In case of ctrl read or ctrl write in protected mode, the rx data and
 	 * the complement of rx data are compared for the error.
 	 */
-	for (u8 i = 0; i < len; i++) {
+	for (i = 0; i < len; i++) {
 		pos = (TC6_HDR_SIZE * 2) + (i * (TC6_HDR_SIZE * 2));
 		rx_data = *(u32 *)&prx[pos];
 		pos = (TC6_HDR_SIZE * 3) + (i * (TC6_HDR_SIZE * 2));
@@ -143,6 +145,7 @@ int oa_tc6_perform_ctrl(struct oa_tc6 *tc6, u32 addr, u32 val[], u8 len,
 	u16 size;
 	u16 pos;
 	int ret;
+	u8 i;
 
 	if (ctrl_prot)
 		size = (TC6_HDR_SIZE * 2) + (len * (TC6_HDR_SIZE * 2));
@@ -180,7 +183,7 @@ int oa_tc6_perform_ctrl(struct oa_tc6 *tc6, u32 addr, u32 val[], u8 len,
 
 	if (!wnr) {
 		/* Copy read data from the rx data in case of ctrl read */
-		for (u8 i = 0; i < len; i++) {
+		for (i = 0; i < len; i++) {
 			if (!ctrl_prot) {
 				pos = (TC6_HDR_SIZE * 2) + (i * TC6_HDR_SIZE);
 				val[i] = be32_to_cpu(*(u32 *)&rx_buf[pos]);
@@ -203,11 +206,12 @@ err_rx_buf_kzalloc:
 static u16 oa_tc6_prepare_empty_chunk(struct oa_tc6 *tc6, u8 *buf, u8 cp_count)
 {
 	u32 hdr;
+	u8 i;
 
 	/* Prepare empty chunks used for getting interrupt information or if
 	 * receive data available.
 	 */
-	for (u8 i = 0; i < cp_count; i++) {
+	for (i = 0; i < cp_count; i++) {
 		hdr = 0;
 		hdr |= FIELD_PREP(DATA_HDR_DNC, 1);
 		hdr |= FIELD_PREP(DATA_HDR_P, oa_tc6_get_parity(hdr));
@@ -277,11 +281,12 @@ static int oa_tc6_process_rx_chunks(struct oa_tc6 *tc6, u8 *buf, u16 len)
 	u8 *payload;
 	u16 ebo;
 	u16 sbo;
+	u8 i;
 
 	/* Calculate the number of chunks received */
 	cp_count = len / (tc6->cps + TC6_FTR_SIZE);
 
-	for (u8 i = 0; i < cp_count; i++) {
+	for (i = 0; i < cp_count; i++) {
 		/* Get the footer and payload */
 		ftr = *(u32 *)&buf[tc6->cps + (i * (tc6->cps + TC6_FTR_SIZE))];
 		ftr = be32_to_cpu(ftr);
@@ -554,6 +559,7 @@ static void oa_tc6_prepare_tx_chunks(struct oa_tc6 *tc6, u8 *buf,
 	u16 copied_bytes = 0;
 	u16 copy_len;
 	u32 hdr;
+	u8 i;
 
 	/* Calculate the number tx credit counts needed to transport the tx
 	 * ethernet frame.
@@ -561,7 +567,7 @@ static void oa_tc6_prepare_tx_chunks(struct oa_tc6 *tc6, u8 *buf,
 	tc6->txc_needed = (skb->len / tc6->cps) + ((skb->len % tc6->cps) ? 1 : 0);
 	tc6->total_txc_needed = tc6->txc_needed;
 
-	for (u8 i = 0; i < tc6->txc_needed; i++) {
+	for (i = 0; i < tc6->txc_needed; i++) {
 		/* Prepare the header for each chunks to be transmitted */
 		hdr = FIELD_PREP(DATA_HDR_DNC, 1) |
 		      FIELD_PREP(DATA_HDR_DV, 1);

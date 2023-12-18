@@ -5,6 +5,7 @@
  * Author: Parthiban Veerasooran <parthiban.veerasooran@microchip.com>
  */
 
+#include <linux/bitfield.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/etherdevice.h>
@@ -83,6 +84,17 @@ struct lan865x_priv {
 static struct {
 	u32 msg_enable;
 } debug = { -1 };
+
+static int device_get_ethdev_address(struct device *dev, struct net_device *netdev)
+{
+	u8 addr[ETH_ALEN];
+	int ret;
+
+	ret = PTR_ERR(device_get_mac_address(dev, addr, ETH_ALEN));
+	if (!ret)
+		eth_hw_addr_set(netdev, addr);
+	return ret;
+}
 
 static void lan865x_handle_link_change(struct net_device *netdev)
 {
@@ -695,7 +707,7 @@ error_oa_tc6_init:
 	return ret;
 }
 
-static void lan865x_remove(struct spi_device *spi)
+static int lan865x_remove(struct spi_device *spi)
 {
 	struct lan865x_priv *priv = spi_get_drvdata(spi);
 
@@ -706,6 +718,8 @@ static void lan865x_remove(struct spi_device *spi)
 	unregister_netdev(priv->netdev);
 	oa_tc6_deinit(priv->tc6);
 	free_netdev(priv->netdev);
+
+	return 0;
 }
 
 #ifdef CONFIG_OF

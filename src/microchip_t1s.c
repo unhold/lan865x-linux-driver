@@ -7,6 +7,7 @@
  *  lan8650/1 Rev.B Internal PHYs
  */
 
+#include <linux/bitfield.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/phy.h>
@@ -145,6 +146,7 @@ static int lan865x_generate_cfg_offsets(struct phy_device *phydev, s8 offsets[2]
 {
 	const u16 fixup_regs[2] = {0x0004, 0x0008};
 	int ret;
+	int i;
 
 	ret = lan865x_revb0_indirect_read(phydev, 0x0005);
 	if (ret < 0)
@@ -154,7 +156,7 @@ static int lan865x_generate_cfg_offsets(struct phy_device *phydev, s8 offsets[2]
 		return -ENODEV;
 	}
 
-	for (int i = 0; i < ARRAY_SIZE(fixup_regs); i++) {
+	for (i = 0; i < ARRAY_SIZE(fixup_regs); i++) {
 		ret = lan865x_revb0_indirect_read(phydev, fixup_regs[i]);
 		if (ret < 0)
 			return ret;
@@ -171,8 +173,9 @@ static int lan865x_generate_cfg_offsets(struct phy_device *phydev, s8 offsets[2]
 static int lan865x_read_cfg_params(struct phy_device *phydev, u16 cfg_params[])
 {
 	int ret;
+	int i;
 
-	for (int i = 0; i < ARRAY_SIZE(lan865x_revb_fixup_cfg_regs); i++) {
+	for (i = 0; i < ARRAY_SIZE(lan865x_revb_fixup_cfg_regs); i++) {
 		ret = phy_read_mmd(phydev, MDIO_MMD_VEND2,
 				   lan865x_revb_fixup_cfg_regs[i]);
 		if (ret < 0)
@@ -186,8 +189,9 @@ static int lan865x_read_cfg_params(struct phy_device *phydev, u16 cfg_params[])
 static int lan865x_write_cfg_params(struct phy_device *phydev, u16 cfg_params[])
 {
 	int ret;
+	int i;
 
-	for (int i = 0; i < ARRAY_SIZE(lan865x_revb_fixup_cfg_regs); i++) {
+	for (i = 0; i < ARRAY_SIZE(lan865x_revb_fixup_cfg_regs); i++) {
 		ret = phy_write_mmd(phydev, MDIO_MMD_VEND2,
 				    lan865x_revb_fixup_cfg_regs[i],
 				    cfg_params[i]);
@@ -235,6 +239,7 @@ static int lan867x_revc_generate_cfg_offsets(struct phy_device *phydev, s8 offse
 {
 	const u16 fixup_regs[2] = {0x0004, 0x0008};
 	int ret;
+	int i;
 
 	ret = lan865x_revb0_indirect_read(phydev, 0x0005);
 	if (ret < 0)
@@ -244,7 +249,7 @@ static int lan867x_revc_generate_cfg_offsets(struct phy_device *phydev, s8 offse
 		return -ENODEV;
 	}
 
-	for (int i = 0; i < ARRAY_SIZE(fixup_regs); i++) {
+	for (i = 0; i < ARRAY_SIZE(fixup_regs); i++) {
 		ret = lan865x_revb0_indirect_read(phydev, fixup_regs[i]);
 		if (ret < 0)
 			return ret;
@@ -266,8 +271,9 @@ static int lan867x_revc_generate_cfg_offsets(struct phy_device *phydev, s8 offse
 static int lan867x_revc_write_cfg_params(struct phy_device *phydev, u16 cfg_params[])
 {
 	int ret;
+	int i;
 
-	for (int i = 0; i < ARRAY_SIZE(lan867x_revc_fixup_cfg_regs); i++) {
+	for (i = 0; i < ARRAY_SIZE(lan867x_revc_fixup_cfg_regs); i++) {
 		ret = phy_write_mmd(phydev, MDIO_MMD_VEND2,
 				    lan867x_revc_fixup_cfg_regs[i],
 				    cfg_params[i]);
@@ -298,11 +304,12 @@ static int lan867x_revc_setup_cfgparam(struct phy_device *phydev)
 static int lan865x_revb_config_init(struct phy_device *phydev)
 {
 	int ret;
+	int i;
 
 	/* Reference to AN1760
 	 * https://ww1.microchip.com/downloads/aemDocuments/documents/AIS/ProductDocuments/SupportingCollateral/AN-LAN8650-1-Configuration-60001760.pdf
 	 */
-	for (int i = 0; i < ARRAY_SIZE(lan865x_revb_fixup_registers); i++) {
+	for (i = 0; i < ARRAY_SIZE(lan865x_revb_fixup_registers); i++) {
 		ret = phy_write_mmd(phydev, MDIO_MMD_VEND2,
 				    lan865x_revb_fixup_registers[i],
 				    lan865x_revb_fixup_values[i]);
@@ -330,6 +337,7 @@ static int lan867x_revb1_config_init(struct phy_device *phydev)
 	 */
 
 	int err;
+	int i;
 
 	/* Read STS2 register and check for the Reset Complete status to do the
 	 * init configuration. If the Reset Complete is not set, wait for 5us
@@ -358,7 +366,7 @@ static int lan867x_revb1_config_init(struct phy_device *phydev)
 	 * new_val = new_val OR value // Set bits
 	 * write_register(mmd, addr, new_val) // Write back updated register value
 	 */
-	for (int i = 0; i < ARRAY_SIZE(lan867x_revb1_fixup_registers); i++) {
+	for (i = 0; i < ARRAY_SIZE(lan867x_revb1_fixup_registers); i++) {
 		err = phy_modify_mmd(phydev, MDIO_MMD_VEND2,
 				     lan867x_revb1_fixup_registers[i],
 				     lan867x_revb1_fixup_masks[i],
@@ -373,6 +381,7 @@ static int lan867x_revb1_config_init(struct phy_device *phydev)
 static int lan867x_revc_config_init(struct phy_device *phydev)
 {
 	int ret;
+	int i;
 
 	ret = phy_read_mmd(phydev, MDIO_MMD_VEND2, LAN867X_REG_STS2);
 	if (ret < 0)
@@ -389,7 +398,7 @@ static int lan867x_revc_config_init(struct phy_device *phydev)
 		}
 	}
 
-	for (int i = 0; i < ARRAY_SIZE(lan867x_revc_fixup_registers); i++) {
+	for (i = 0; i < ARRAY_SIZE(lan867x_revc_fixup_registers); i++) {
 		ret = phy_write_mmd(phydev, MDIO_MMD_VEND2,
 				    lan867x_revc_fixup_registers[i],
 				    lan867x_revc_fixup_values[i]);
